@@ -2,6 +2,8 @@
 
 独立 Compose 项目，镜像固定 2026.9.6，Gateway 端口只绑定回环地址，保留独立状态卷。不要挂载宿主 Docker socket；停止保留状态，不用 down -v。SC Mail 的 API/CLI/MCP/Agent 标识 ai-mail 为兼容名称。
 
+`openclaw_state` 挂载 `/home/node/.openclaw`，保存配置、workspace、会话和凭据。原 `openclaw_auth` 仅挂载旧配置目录 `/home/node/.config/openclaw`，本机核实为空且没有其他依赖后已从 Compose 移除。已有安装只在确认旧卷为空、没有其他容器使用时才可删除；不要按名称批量删除卷。
+
 ## 接入入口
 
 - 新安装、onboarding、MCP/Skill、配对、事件和 WhatsApp sender：统一按 [Docker Desktop 教程](../docs/OPENCLAW_INTEGRATION_GUIDE.md#2-从零接通本机-docker-desktop)。

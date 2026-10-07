@@ -26,7 +26,6 @@ services:
       - "127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}:18789"
     volumes:
       - openclaw_state:/home/node/.openclaw
-      - openclaw_auth:/home/node/.config/openclaw
       - ../scripts/ai-mail-mcp.mjs:/opt/ai-mail-mcp.mjs:ro
       - ../scripts/ai-mail.mjs:/opt/ai-mail.mjs:ro
       - ../scripts/tool-contracts.mjs:/opt/tool-contracts.mjs:ro
@@ -67,7 +66,6 @@ services:
       BROWSER: echo
     volumes:
       - openclaw_state:/home/node/.openclaw
-      - openclaw_auth:/home/node/.config/openclaw
       - ../scripts/ai-mail-mcp.mjs:/opt/ai-mail-mcp.mjs:ro
       - ../scripts/ai-mail.mjs:/opt/ai-mail.mjs:ro
       - ../scripts/tool-contracts.mjs:/opt/tool-contracts.mjs:ro
@@ -89,4 +87,3 @@ services:
 
 volumes:
   openclaw_state:
-  openclaw_auth:
