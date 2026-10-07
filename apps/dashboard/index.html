@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>SC Mail · 商务邮件工作台</title>
+    <link rel="stylesheet" href="/dashboard/styles.css">
+    <link rel="stylesheet" href="/dashboard/typography.css">
+    <script src="/dashboard/app.js" defer></script>
+  </head>
+  <body>
+    <div id="auth-loading" class="login-screen auth-loading" aria-live="polite">
+      <div class="auth-loading-card">
+        <p class="auth-title">SC Mail Console</p>
+        <p>正在验证登录状态…</p>
+      </div>
+    </div>
+
+    <div id="login" class="login-screen hidden">
+      <form id="login-form" class="login-card">
+        <h1>SC Mail Console</h1>
+        <label for="email">邮箱</label>
+        <input id="email" type="email" autocomplete="username" required placeholder="name@example.com">
+        <label for="password">密码</label>
+        <input id="password" type="password" autocomplete="current-password" required minlength="6" placeholder="请输入密码">
+        <button class="button primary full" type="submit">登录工作区</button>
+        <p id="login-error" class="error" role="alert"></p>
+      </form>
+    </div>
+
+    <div id="app" class="app-shell hidden">
+      <aside class="sidebar">
+        <div class="brand"><div><strong>SC Mail</strong><span>Console</span></div></div>
+        <nav id="navigation" aria-label="主导航">
+          <p class="nav-label">工作区</p>
+          <button data-page="overview" class="nav-item active"><span>◫</span> 总览</button>
+          <button data-page="inbox" class="nav-item"><span>✉</span> 商务收件箱</button>
+          <button data-page="sent" class="nav-item"><span>➤</span> 已发邮件</button>
+          <button data-page="tasks" class="nav-item"><span>☑</span> 待办任务</button>
+          <button data-page="projects" class="nav-item"><span>▦</span> 项目</button>
+          <button data-page="timeline" class="nav-item"><span>↗</span> 项目时间线</button>
+          <p class="nav-label separated">客户关系</p>
+          <button data-page="contacts" class="nav-item"><span>♙</span> 联系人</button>
+          <button data-page="companies" class="nav-item"><span>▤</span> 公司</button>
+          <p class="nav-label separated">管理</p>
+          <button data-page="reviews" class="nav-item"><span>◇</span> 人工复核</button>
+          <button data-page="sender-rules" class="nav-item"><span>⊙</span> 发件人规则</button>
+          <button data-page="delivery-failures" class="nav-item"><span>↯</span> 投递失败</button>
+          <button data-page="audit" class="nav-item"><span>≋</span> 分类与审计</button>
+          <button data-page="account" class="nav-item"><span>♙</span> 账户与密码</button>
+          <button data-page="settings" class="nav-item"><span>⚙</span> 系统状态</button>
+        </nav>
+        <div class="sidebar-bottom"><span class="status-dot"></span><span>本机 SC Mail 服务</span><button id="logout" class="logout" title="退出登录" aria-label="退出登录">↪ <span class="logout-label">退出登录</span></button></div>
+      </aside>
+      <main class="main-area">
+        <header class="topbar"><div><p class="eyebrow">SC MAIL / BUSINESS</p><h1 id="page-title">总览</h1></div><div class="top-actions"><span id="today-label" class="muted"></span><button id="refresh" class="button secondary">↻ <span>刷新</span></button></div></header>
+        <section id="notice" class="notice hidden" role="status"></section>
+        <section id="content" class="content" aria-live="polite"></section>
+      </main>
+    </div>
+    <dialog id="detail-dialog" class="detail-dialog"><button class="dialog-close" aria-label="关闭">×</button><div id="dialog-content"></div></dialog>
+  </body>
+</html>

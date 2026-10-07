@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Node 24 / PostgreSQL 17
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DATABASE_URL: postgresql://postgres:ci-only-password@127.0.0.1:5432/sc_mail_ci?schema=public
+      AI_MAIL_API_URL: http://127.0.0.1:1/api/v1
+      AI_MAIL_API_TOKEN: ''
+      IMAP_API_TOKEN: ''
+      IMAP_HOST: imap.test.invalid
+      IMAP_EMAIL: ci-owner@test.invalid
+      OPENAI_API_KEY: ''
+      OPENAI_BASE_URL: ''
+      AGENT_EVENT_WEBHOOK_URL: ''
+      TELEGRAM_BOT_TOKEN: ''
+      OPENCLAW_WHATSAPP_NOTIFY_URL: ''
+      NOTIFICATION_ALLOWED_CHANNELS: ''
+      NOTIFICATION_ALLOWED_RECIPIENTS: ''
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: sc_mail_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sc_mail_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client and validate schema
+        run: |
+          pnpm prisma:generate
+          pnpm prisma:validate
+
+      - name: Typecheck and build
+        run: |
+          pnpm typecheck
+          pnpm build
+
+      - name: Run isolated adapter and UI regressions
+        run: |
+          pnpm verify:tool-contracts
+          pnpm verify:dashboard
+          pnpm verify:review-fixes
+          pnpm verify:contact-resolver
+          pnpm verify:project-review
+          pnpm verify:project-analysis-evidence
+
+      - name: Run isolated CRM and project-analysis PostgreSQL regressions
+        env:
+          CRM_DELETE_ALLOW_LOCAL_DB_CREATE: '1'
+          MANUAL_CRM_ALLOW_LOCAL_DB_CREATE: '1'
+          PROJECT_ANALYSIS_ALLOW_LOCAL_DB_CREATE: '1'
+          UI_CRM_ALLOW_LOCAL_DB_CREATE: '1'
+          UI_CRM_RUN_CLI_SUITE: '1'
+          PORT: '3001'
+        run: |
+          pnpm verify:crm-delete
+          pnpm verify:manual-crm
+          pnpm verify:project-analysis
+          node scripts/ui-crm-acceptance.cjs

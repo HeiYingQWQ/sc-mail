@@ -1,0 +1,836 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model DashboardUser {
+  id                 String             @id @default(cuid())
+  email              String             @unique
+  passwordHash       String
+  passwordSalt       String
+  mustChangePassword Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  sessions           DashboardSession[]
+
+  @@index([updatedAt])
+}
+
+model DashboardSession {
+  id         String        @id @default(cuid())
+  userId     String
+  tokenHash  String        @unique
+  expiresAt  DateTime
+  createdAt  DateTime      @default(now())
+  lastUsedAt DateTime      @default(now())
+  user       DashboardUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+model MailAccount {
+  id                 String                        @id @default(cuid())
+  provider           String                        @default("imap")
+  email              String                        @unique
+  host               String
+  port               Int
+  tlsMode            String
+  username           String
+  passwordCiphertext String
+  mailbox            String                        @default("INBOX")
+  status             String                        @default("disconnected")
+  lastErrorCode      String?
+  lastConnectedAt    DateTime?
+  createdAt          DateTime                      @default(now())
+  updatedAt          DateTime                      @updatedAt
+  messages           EmailMessage[]
+  syncCheckpoints    SyncCheckpoint[]
+  analysisRuns       AnalysisRun[]
+  processingRecords  ProcessingRecord[]
+  importanceTriages  EmailImportanceTriage[]
+  projectAnalysisJobs ProjectAnalysisJob[]
+  senderRules        SenderRule[]
+  reconciliation     MailReconciliationCheckpoint?
+  deletionSync       MailDeletionSyncCheckpoint?
+  deletionTombstones MailDeletionTombstone[]
+}
+
+model EmailMessage {
+  id                           String            @id @default(cuid())
+  mailAccountId                String
+  mailbox                      String
+  uidValidity                  BigInt
+  uid                          Int
+  providerMessageId            String
+  historicalImport             Boolean           @default(false)
+  rfcMessageId                 String?
+  threadId                     String?
+  direction                    String
+  fromJson                     Json
+  toJson                       Json
+  ccJson                       Json
+  bccJson                      Json
+  subject                      String?
+  bodyText                     String?
+  bodyHtml                     String?
+  headersJson                  Json
+  rawSource                    Bytes
+  sentAt                       DateTime?
+  receivedAt                   DateTime?
+  classification               String            @default("UNKNOWN")
+  classificationReason         String?
+  classificationEvidence       Json              @default("[]")
+  automationDetails            Json              @default("{}")
+  reviewRequired               Boolean           @default(true)
+  classifiedAt                 DateTime?
+  classificationManualOverride Boolean           @default(false)
+  campaignId                   String?
+  campaignRole                 String?
+  promotionStatus              String            @default("none")
+  senderRuleSnapshot           Json?
+  contactId                    String?
+  companyId                    String?
+  contactResolutionStatus      String            @default("unresolved")
+  contactResolutionConfidence  Float?
+  contactResolutionReason      String?
+  companyResolutionReason      String?
+  projectId                    String?
+  topicId                      String?
+  projectResolutionStatus      String            @default("unresolved")
+  projectConfidence            Float?
+  projectReason                String?
+  projectResolutionEvidence    Json?
+  projectAssignmentVersion     Int               @default(1)
+  projectManualOverride        Boolean           @default(false)
+  topicResolutionStatus        String            @default("unresolved")
+  topicConfidence              Float?
+  topicReason                  String?
+  topicManualOverride          Boolean           @default(false)
+  createdAt                    DateTime          @default(now())
+  mailAccount                  MailAccount       @relation(fields: [mailAccountId], references: [id], onDelete: Restrict)
+  campaign                     OutreachCampaign? @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  contact                      Contact?          @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  company                      Company?          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  project                      Project?          @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  topic                        Topic?            @relation(fields: [topicId], references: [id], onDelete: Restrict)
+  projectAnalysisItems         ProjectAnalysisItem[]
+  reviewItems                  ReviewItem[]
+  analysisRuns                 AnalysisRun[]
+  createdTasks                 Task[]            @relation("TaskCreatedFrom")
+  completedTasks               Task[]            @relation("TaskCompletedFrom")
+  requirements                 Requirement[]
+  decisions                    Decision[]
+  summaryVersions              SummaryVersion[]
+  timelineEvents               TimelineEvent[]
+  taskEvidence                 TaskEvidence[]
+  processingRecord             ProcessingRecord?
+  importanceTriage             EmailImportanceTriage?
+
+  @@unique([mailAccountId, providerMessageId])
+  @@unique([mailAccountId, mailbox, uidValidity, uid])
+  @@index([mailAccountId, threadId])
+  @@index([mailAccountId, receivedAt])
+  @@index([mailAccountId, mailbox, rfcMessageId])
+  @@index([mailAccountId, rfcMessageId])
+  @@index([mailAccountId, classification, reviewRequired])
+  @@index([campaignId, promotionStatus])
+  @@index([contactId, receivedAt])
+  @@index([companyId, receivedAt])
+  @@index([mailAccountId, direction, classification, contactResolutionStatus])
+  @@index([projectId, receivedAt])
+  @@index([topicId, receivedAt])
+  @@index([mailAccountId, direction, classification, projectResolutionStatus])
+}
+
+model MailDeletionTombstone {
+  id            String      @id @default(cuid())
+  mailAccountId String
+  mailbox       String
+  uidValidity   BigInt
+  uid           Int
+  messageId     String
+  deletedAt     DateTime    @default(now())
+  mailAccount   MailAccount @relation(fields: [mailAccountId], references: [id], onDelete: Restrict)
+
+  @@unique([mailAccountId, mailbox, uidValidity, uid])
+  @@index([messageId])
+}
+
+model MailDeletionSyncCheckpoint {
+  id              String      @id @default(cuid())
+  mailAccountId   String      @unique
+  lastCompletedAt DateTime?
+  lastAttemptAt   DateTime?
+  nextRunAt       DateTime    @default(now())
+  status          String      @default("idle")
+  lastErrorCode   String?
+  leaseToken      String?
+  leaseExpiresAt  DateTime?
+  scannedCount    Int         @default(0)
+  deletedCount    Int         @default(0)
+  updatedAt       DateTime    @updatedAt
+  mailAccount     MailAccount @relation(fields: [mailAccountId], references: [id], onDelete: Restrict)
+
+  @@index([status, nextRunAt])
+}
+
+model EmailImportanceTriage {
+  id                String       @id @default(cuid())
+  mailAccountId     String
+  sourceMessageId   String       @unique
+  source            String       @default("realtime")
+  status            String       @default("pending")
+  importance        String?
+  confidence        Float?
+  reason            String?
+  evidenceJson      Json         @default("[]")
+  provider          String?
+  model             String?
+    promptVersion     String?
+    schemaVersion     String?
+  attempts          Int          @default(0)
+  maxAttempts       Int          @default(3)
+  nextAttemptAt     DateTime     @default(now())
+  leaseToken        String?
+  leaseExpiresAt    DateTime?
+  lastErrorCode     String?
+  analyzedAt        DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  mailAccount       MailAccount  @relation(fields: [mailAccountId], references: [id], onDelete: Restrict)
+  sourceMessage     EmailMessage @relation(fields: [sourceMessageId], references: [id], onDelete: Restrict)
+
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([mailAccountId, status, updatedAt])
+  @@index([importance, createdAt])
+}
+
+model SenderRule {
+  id            String      @id @default(cuid())
+  mailAccountId String
+  action        String
+  matchType     String
+  pattern       String
+  actorId       String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  deletedAt     DateTime?
+  mailAccount   MailAccount @relation(fields: [mailAccountId], references: [id], onDelete: Restrict)
+
+  @@unique([mailAccountId, matchType, pattern])
+  @@index([mailAccountId, deletedAt])
+}
+
+model SystemMailSender {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Company {
+  id        String         @id @default(cuid())
+  name      String
+  domain    String?        @unique
+  website   String?
+  address   String?
+  notes     String?
+  version   Int            @default(1)
+  status    String         @default("confirmed")
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  contacts  Contact[]
+  messages  EmailMessage[]
+  projects  Project[]
+}
+
+model Contact {
+  id                String         @id @default(cuid())
+  mergedIntoId      String?
+  companyId         String?
+  displayName       String
+  notes             String?
+  version           Int            @default(1)
+  status            String         @default("confirmed")
+  confidence        Float          @default(0.25)
+  provisionalReason String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  company           Company?       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  mergedInto        Contact?       @relation("ContactMerge", fields: [mergedIntoId], references: [id], onDelete: Restrict)
+  mergedContacts    Contact[]      @relation("ContactMerge")
+  emails            ContactEmail[]
+  messages          EmailMessage[]
+  decisions         Decision[]
+  projectContacts   ProjectContact[]
+
+  @@index([companyId, status])
+  @@index([mergedIntoId])
+}
+
+model ContactEmail {
+  id        String   @id @default(cuid())
+  contactId String
+  email     String   @unique
+  isPrimary Boolean  @default(true)
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Restrict)
+
+  @@index([contactId, isPrimary])
+}
+
+model OutreachCampaign {
+  id          String         @id @default(cuid())
+  campaignKey String         @unique
+  name        String
+  createdAt   DateTime       @default(now())
+  messages    EmailMessage[]
+}
+
+model Project {
+  id             String          @id @default(cuid())
+  companyId      String?
+  name           String
+  description    String?
+  stage          String          @default("lead")
+  waitingOn      String          @default("none")
+  waitingParties Json            @default("[]")
+  replyRequired  Boolean         @default(false)
+  followUpAt     DateTime?
+  version        Int             @default(1)
+  manualOverride Boolean         @default(false)
+  status         String          @default("active")
+  confidence     Float           @default(1)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  company        Company?        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  topics         Topic[]
+  messages       EmailMessage[]
+  tasks          Task[]
+  requirements   Requirement[]
+  decisions      Decision[]
+  timelineEvents TimelineEvent[]
+  projectContacts ProjectContact[]
+  analysisJobs    ProjectAnalysisJob[]
+  analysisChoices ProjectAnalysisItem[] @relation("ProjectAnalysisChosenProject")
+
+  @@index([companyId, status])
+  @@index([name])
+}
+
+model ProjectContact {
+  projectId String
+  contactId String
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Restrict)
+
+  @@id([projectId, contactId])
+  @@index([contactId, projectId])
+  @@index([projectId, isPrimary])
+}
+
+model Topic {
+  id             String          @id @default(cuid())
+  projectId      String
+  name           String
+  normalizedName String
+  type           String          @default("custom")
+  description    String?
+  status         String          @default("active")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  messages       EmailMessage[]
+  tasks          Task[]
+  requirements   Requirement[]
+  decisions      Decision[]
+  timelineEvents TimelineEvent[]
+
+  @@unique([projectId, normalizedName])
+  @@index([projectId, status])
+}
+
+model ReviewItem {
+  id                 String        @id @default(cuid())
+  entityType         String
+  entityId           String
+  sourceMessageId    String?
+  sourceDeletedAt    DateTime?
+  reasonCode         String
+  proposedChangeJson Json?
+  confidence         Float
+  status             String        @default("pending")
+  resolutionJson     Json?
+  resolvedBy         String?
+  resolvedAt         DateTime?
+  dedupeKeyBase      String
+  cycle              Int           @default(1)
+  dedupeKey          String        @unique
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  sourceMessage      EmailMessage? @relation(fields: [sourceMessageId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([entityType, entityId, status])
+  @@index([sourceMessageId, status])
+  @@index([dedupeKeyBase, cycle])
+}
+
+model AnalysisRun {
+  id                   String       @id @default(cuid())
+  mailAccountId        String
+  sourceMessageId      String
+  requestKey           String
+  provider             String
+  model                String
+  promptVersion        String
+  schemaVersion        String
+  status               String       @default("processing")
+  validationStatus     String?
+  leaseToken           String?
+  leaseExpiresAt       DateTime?
+  inputSummaryJson     Json
+  resultJson           Json?
+  validationErrorsJson Json?
+  durationMs           Int?
+  errorCode            String?
+  startedAt            DateTime     @default(now())
+  completedAt          DateTime?
+  createdAt            DateTime     @default(now())
+  mailAccount          MailAccount  @relation(fields: [mailAccountId], references: [id], onDelete: Restrict)
+  sourceMessage        EmailMessage @relation(fields: [sourceMessageId], references: [id], onDelete: Restrict)
+
+  @@unique([mailAccountId, requestKey])
+  @@index([sourceMessageId, createdAt])
+  @@index([status, createdAt])
+}
+
+model ProjectAnalysisJob {
+  id                    String                @id @default(cuid())
+  projectId             String?
+  mailAccountId         String
+  operationId           String
+  inputHash             String
+  trigger               String                @default("manual")
+  status                String                @default("pending")
+  fromDate              DateTime?
+  throughDate           DateTime?
+  totalCandidateCount   Int                   @default(0)
+  candidateCount        Int                   @default(0)
+  candidateTruncated    Boolean               @default(false)
+  contextTruncatedCount Int                   @default(0)
+  processedCount        Int                   @default(0)
+  assignedCount         Int                   @default(0)
+  nonProjectCount       Int                   @default(0)
+  newOpportunityCount   Int                   @default(0)
+  needsReviewCount      Int                   @default(0)
+  failedCount           Int                   @default(0)
+  cancelRequested       Boolean               @default(false)
+  attempts              Int                   @default(0)
+  maxAttempts           Int                   @default(3)
+  nextAttemptAt         DateTime              @default(now())
+  leaseToken            String?
+  leaseExpiresAt        DateTime?
+  projectContextHash    String
+  summaryStatus         String                @default("pending")
+  summaryErrorCode      String?
+  summaryInputHash      String?
+  errorCode             String?
+  startedAt             DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  project               Project?              @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  mailAccount           MailAccount           @relation(fields: [mailAccountId], references: [id], onDelete: Restrict)
+  items                 ProjectAnalysisItem[]
+
+  @@unique([mailAccountId, operationId])
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([projectId, createdAt])
+}
+
+model ProjectAnalysisItem {
+  id                    String              @id @default(cuid())
+  jobId                 String
+  sourceMessageId       String?
+  sourceDeletedAt       DateTime?
+  assignmentVersion     Int                 @default(1)
+  contextTruncated      Boolean             @default(false)
+  status                String              @default("pending")
+  outcome               String?
+  chosenProjectId       String?
+  candidateProjectIds   Json                @default("[]")
+  evidenceJson          Json                @default("[]")
+  reason                String?
+  inputHash             String?
+  contextHash           String?
+  attempts              Int                 @default(0)
+  maxAttempts           Int                 @default(3)
+  nextAttemptAt         DateTime            @default(now())
+  lastErrorCode         String?
+  leaseToken            String?
+  leaseExpiresAt        DateTime?
+  analyzedAt            DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  job                   ProjectAnalysisJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  sourceMessage         EmailMessage?       @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  chosenProject         Project?            @relation("ProjectAnalysisChosenProject", fields: [chosenProjectId], references: [id], onDelete: Restrict)
+
+  @@unique([jobId, sourceMessageId])
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([sourceMessageId, createdAt])
+  @@index([chosenProjectId, createdAt])
+}
+
+model ProcessingRecord {
+  id                String       @id @default(cuid())
+  mailAccountId     String
+  sourceMessageId   String       @unique
+  provider          String
+  providerMessageId String
+  classification    String       @default("UNKNOWN")
+  confidence        Float?
+  status            String       @default("pending")
+  analysisVersion   String?
+  processedAt       DateTime?
+  lastError         String?
+  reviewId          String?
+  expiresAt         DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  mailAccount       MailAccount  @relation(fields: [mailAccountId], references: [id], onDelete: Restrict)
+  sourceMessage     EmailMessage @relation(fields: [sourceMessageId], references: [id], onDelete: Restrict)
+
+  @@unique([mailAccountId, provider, providerMessageId])
+  @@index([mailAccountId, status, updatedAt])
+}
+
+model MailReconciliationCheckpoint {
+  id                       String      @id @default(cuid())
+  mailAccountId            String      @unique
+  status                   String      @default("idle")
+  auditFrom                DateTime?
+  auditThrough             DateTime?
+  lastAuditStartedAt       DateTime?
+  lastAuditCompletedAt     DateTime?
+  mailboxCursors           Json        @default("{}")
+  scannedCount             Int         @default(0)
+  importedCount            Int         @default(0)
+  processingRecordsCreated Int         @default(0)
+  crmRepaired              Int         @default(0)
+  needsReviewCount         Int         @default(0)
+  lastErrorCode            String?
+  leaseToken               String?
+  leaseExpiresAt           DateTime?
+  nextRunAt                DateTime    @default(now())
+  updatedAt                DateTime    @updatedAt
+  mailAccount              MailAccount @relation(fields: [mailAccountId], references: [id], onDelete: Restrict)
+
+  @@index([status, nextRunAt])
+}
+
+model Task {
+  id                     String         @id @default(cuid())
+  projectId              String?
+  topicId                String?
+  title                  String
+  description            String?
+  kind                   String         @default("action")
+  ownerType              String?
+  ownerId                String?
+  waitingOn              String         @default("none")
+  version                Int            @default(1)
+  manualOverride         Boolean        @default(false)
+  status                 String         @default("open")
+  priority               String         @default("normal")
+  deadlineAt             DateTime?
+  deadlineDate           String?
+  deadlineTimezone       String?
+  deadlineText           String?
+  waitingSince           DateTime?
+  createdFromMessageId   String?
+  completedFromMessageId String?
+  createdSourceDeletedAt DateTime?
+  completedSourceDeletedAt DateTime?
+  origin                 String         @default("user")
+  createdBy              String?
+  sourceOperationId      String?        @unique
+  completedAt            DateTime?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  project                Project?       @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  topic                  Topic?         @relation(fields: [topicId], references: [id], onDelete: Restrict)
+  createdFromMessage     EmailMessage?  @relation("TaskCreatedFrom", fields: [createdFromMessageId], references: [id], onDelete: Restrict)
+  completedFromMessage   EmailMessage?  @relation("TaskCompletedFrom", fields: [completedFromMessageId], references: [id], onDelete: Restrict)
+  evidence               TaskEvidence[]
+
+  @@index([projectId, status, deadlineAt])
+  @@index([topicId, status])
+  @@index([status, deadlineDate])
+  @@index([createdFromMessageId])
+}
+
+model TaskEvidence {
+  id              String       @id @default(cuid())
+  taskId          String
+  sourceMessageId String
+  evidenceType    String
+  excerpt         String
+  confidence      Float
+  createdAt       DateTime     @default(now())
+  task            Task         @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  sourceMessage   EmailMessage @relation(fields: [sourceMessageId], references: [id], onDelete: Restrict)
+
+  @@unique([taskId, sourceMessageId, evidenceType])
+  @@index([sourceMessageId, createdAt])
+}
+
+model Requirement {
+  id                String        @id @default(cuid())
+  projectId         String?
+  topicId           String?
+  text              String
+  status            String        @default("open")
+  version           Int           @default(1)
+  manualOverride    Boolean       @default(false)
+  sourceMessageId   String?
+  sourceDeletedAt   DateTime?
+  createdBy         String?
+  sourceOperationId String?       @unique
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  project           Project?      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  topic             Topic?        @relation(fields: [topicId], references: [id], onDelete: Restrict)
+  sourceMessage     EmailMessage? @relation(fields: [sourceMessageId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, status])
+  @@index([topicId, status])
+  @@index([sourceMessageId])
+}
+
+model Decision {
+  id                 String        @id @default(cuid())
+  projectId          String?
+  topicId            String?
+  text               String
+  status             String        @default("proposed")
+  version            Int           @default(1)
+  manualOverride     Boolean       @default(false)
+  decidedByContactId String?
+  sourceMessageId    String?
+  sourceDeletedAt    DateTime?
+  createdBy          String?
+  sourceOperationId  String?       @unique
+  decidedAt          DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  project            Project?      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  topic              Topic?        @relation(fields: [topicId], references: [id], onDelete: Restrict)
+  decidedByContact   Contact?      @relation(fields: [decidedByContactId], references: [id], onDelete: Restrict)
+  sourceMessage      EmailMessage? @relation(fields: [sourceMessageId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, status])
+  @@index([topicId, status])
+  @@index([sourceMessageId])
+}
+
+model BusinessOperation {
+  id                String   @id @default(cuid())
+  operationId       String   @unique
+  sourceOperationId String?  @unique
+  inputHash         String
+  entityType        String
+  entityId          String
+  action            String
+  actorId           String
+  sourceMessageId   String?
+  beforeJson        Json?
+  afterJson         Json
+  createdAt         DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([sourceMessageId, createdAt])
+}
+
+model AgentEvent {
+  id                 String                 @id @default(cuid())
+  eventKey           String                 @unique
+  eventType          String
+  entityType         String
+  entityId           String
+  priority           Int                    @default(0)
+  payloadJson        Json
+  notificationPolicy String                 @default("NEVER")
+  status             String                 @default("pending")
+  assignedAgent      String?
+  leaseToken         String?
+  leaseExpiresAt     DateTime?
+  attempts           Int                    @default(0)
+  maxAttempts        Int                    @default(8)
+  nextAttemptAt      DateTime               @default(now())
+  lastError          String?
+  resultJson         Json?
+  createdAt          DateTime               @default(now())
+  processedAt        DateTime?
+  notifications      NotificationDelivery[]
+  wakeupDelivery     AgentWakeupDelivery?
+
+  @@index([status, nextAttemptAt, priority, createdAt])
+  @@index([entityType, entityId, createdAt])
+}
+
+model AgentWakeupDelivery {
+  id             String     @id @default(cuid())
+  eventId        String     @unique
+  status         String     @default("pending")
+  attempts       Int        @default(0)
+  leaseToken     String?
+  leaseExpiresAt DateTime?
+  nextAttemptAt  DateTime   @default(now())
+  lastError      String?
+  createdAt      DateTime   @default(now())
+  deliveredAt    DateTime?
+  event          AgentEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+
+  @@index([status, nextAttemptAt, createdAt])
+}
+
+model TelegramCursor {
+  id           String   @id @default("telegram")
+  nextUpdateId BigInt   @default(0)
+  updatedAt    DateTime @updatedAt
+}
+
+model TelegramInboxMessage {
+  id             String    @id @default(cuid())
+  updateId       BigInt    @unique
+  chatId         String
+  userId         String
+  messageId      BigInt
+  text           String
+  responseText   String?
+  status         String    @default("pending")
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(5)
+  leaseToken     String?
+  leaseExpiresAt DateTime?
+  nextAttemptAt  DateTime  @default(now())
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  processedAt    DateTime?
+
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([chatId, createdAt])
+}
+
+model NotificationDelivery {
+  id                 String      @id @default(cuid())
+  requestKey         String      @unique
+  requestHash        String
+  eventId            String?
+  channel            String
+  recipientRef       String
+  content            String
+  status             String      @default("pending")
+  attempts           Int         @default(0)
+  leaseToken         String?
+  leaseExpiresAt     DateTime?
+  nextAttemptAt      DateTime    @default(now())
+  providerDeliveryId String?
+  lastError          String?
+  createdAt          DateTime    @default(now())
+  deliveredAt        DateTime?
+  event              AgentEvent? @relation(fields: [eventId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([eventId, createdAt])
+}
+
+model SyncCheckpoint {
+  id                     String      @id @default(cuid())
+  mailAccountId          String
+  mailbox                String
+  uidValidity            BigInt?
+  targetUid              Int?
+  fromDate               DateTime
+  throughDate            DateTime
+  lastUid                Int         @default(0)
+  status                 String      @default("pending")
+  scannedCount           Int         @default(0)
+  importedCount          Int         @default(0)
+  lastErrorCode          String?
+  lastPolledAt           DateTime?
+  lastSuccessfulSyncAt   DateTime?
+  reconciliationRequired Boolean     @default(false)
+  updatedAt              DateTime    @updatedAt
+  completedAt            DateTime?
+  mailAccount            MailAccount @relation(fields: [mailAccountId], references: [id], onDelete: Restrict)
+
+  @@unique([mailAccountId, mailbox])
+  @@index([mailAccountId, status])
+}
+
+model Summary {
+  id               String           @id @default(cuid())
+  entityType       String
+  entityId         String
+  currentVersionId String?
+  version          Int              @default(0)
+  isDerived        Boolean          @default(false)
+  manualOverride   Boolean          @default(false)
+  inputHash        String?
+  coverageJson     Json?
+  updatedAt        DateTime         @updatedAt
+  versions         SummaryVersion[]
+
+  @@unique([entityType, entityId])
+  @@index([updatedAt])
+}
+
+model SummaryVersion {
+  id               String        @id @default(cuid())
+  summaryId        String
+  version          Int
+  previousSummary  String?
+  newSummary       String
+  triggerMessageId String?
+  sourceDeletedAt   DateTime?
+  model            String
+  confidence       Float?
+  isSuggestion     Boolean         @default(false)
+  createdAt        DateTime      @default(now())
+  summary          Summary       @relation(fields: [summaryId], references: [id], onDelete: Restrict)
+  triggerMessage   EmailMessage? @relation(fields: [triggerMessageId], references: [id], onDelete: Restrict)
+
+  @@unique([summaryId, version])
+  @@index([triggerMessageId, createdAt])
+}
+
+model TimelineEvent {
+  id              String        @id @default(cuid())
+  projectId       String?
+  topicId         String?
+  eventType       String
+  title           String
+  description     String?
+  sourceMessageId String?
+  sourceDeletedAt DateTime?
+  metadataJson    Json?
+  createdAt       DateTime      @default(now())
+  project         Project?      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  topic           Topic?        @relation(fields: [topicId], references: [id], onDelete: Restrict)
+  sourceMessage   EmailMessage? @relation(fields: [sourceMessageId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, createdAt])
+  @@index([topicId, createdAt])
+  @@index([sourceMessageId, createdAt])
+}

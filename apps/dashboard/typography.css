@@ -1,0 +1,56 @@
+/* Increase existing interface text by about 3 px for comfortable reading. */
+body { font-size: 19px; }
+h1 { font-size: 28px; }
+h2 { font-size: 20px; }
+h3 { font-size: 17px; }
+.topbar h1 { font-size: 25px; }
+.detail-dialog h2 { font-size: 23px; }
+.detail-dialog h3 { font-size: 17px; }
+.eyebrow,.nav-label,.brand span,.sidebar-bottom,.metric-note,.list-main p,.form-grid label,.small-text { font-size: 13px; }
+.button,.nav-item,.section-head p,.metric-label,.toolbar select,.toolbar input,.data-table,.notice-inline,.detail-meta,.status-item { font-size: 14px; }
+.login-card label,.button:not(.small),.email-body { font-size: 15px; }
+.button.small,.top-actions,.pagination,.form-grid input,.form-grid select,.form-grid textarea { font-size: 14px; }
+.error,.section-title p,.notice,.empty,.loading { font-size: 15px; }
+.data-table th,.form-grid label,.detail-meta span,.status-label { font-size: 13px; }
+.badge,.list-meta { font-size: 12px; }
+.list-main strong { font-size: 14px; }
+.metric-value { font-size: 31px; }
+.brand-mark { font-size: 25px; }
+.brand-mark.small { font-size: 21px; }
+.brand strong { font-size: 18px; }
+.nav-item span { font-size: 18px; }
+.logout { font-size: 20px; }
+.dialog-close { font-size: 22px; }
+.email-body { line-height: 1.7; }
+.json-block { font-size: 13px; line-height: 1.6; }
+.kpi span { font-size: 13px; }
+.kpi strong { font-size: 22px; }
+.status-label { color: #83909f; }
+.status-value { font-size: 14px; font-weight: 600; color: #344b63; overflow-wrap: anywhere; }
+.status-item { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #eef1f5; }
+.status-group { margin: 12px 0; padding: 12px; border: 1px solid #edf1f5; border-radius: 9px; background: #fbfcfe; }
+.status-record { margin: 9px 0; padding: 10px 12px; border-left: 2px solid #c8d6ed; background: #fff; }
+.status-record h3,.status-group h3 { margin: 0 0 6px; color: #62758a; font-size: 14px; }
+.review-merge-target { display: grid; gap: 5px; color: #6f7f90; font-size: 13px; }
+.entity-picker { display: grid; gap: 8px; min-width: 0; }
+.entity-picker select { width: 100%; min-width: 180px; max-width: 100%; }
+.picker-controls,.picker-search { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.picker-controls .small-text { flex: 1; }
+.picker-search input { min-width: 150px; flex: 1; padding: 8px; border: 1px solid #dce3eb; border-radius: 8px; }
+.evidence-excerpt { white-space: pre-wrap; overflow-wrap: anywhere; }
+.logout-label { display: none; }
+@media(max-width:680px) {
+  .topbar h1 { font-size: 22px; }
+  .metric-value { font-size: 26px; }
+  .sidebar-bottom { display: flex; margin-top: 10px; padding-top: 8px; }
+  .sidebar-bottom > span { display: none; }
+  .logout-label { display: inline; font-size: 14px; }
+  .entity-picker { width: 100%; }
+  .section-head > .button { flex-shrink: 0; white-space: nowrap; }
+}
+
+/* A text-only identity shared by sign-in and session restoration. */
+.login-card h1 { text-align: center; margin: 0 0 32px; font-size: 27px; }
+.auth-title { color: #24384f; font-size: 24px; font-weight: 700; margin: 0; text-align: center; }
+.sidebar .brand { padding-bottom: 22px; }
+.sidebar .brand > div { padding-top: 0; }
