@@ -1,0 +1,16 @@
+services:
+  backend:
+    networks:
+      default: {}
+      sc_mail_bridge:
+        aliases:
+          - sc-mail-api
+  worker:
+    networks:
+      default: {}
+      sc_mail_bridge: {}
+
+networks:
+  sc_mail_bridge:
+    external: true
+    name: sc-mail-link

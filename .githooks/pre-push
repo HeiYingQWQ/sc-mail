@@ -1,0 +1,16 @@
+#!/bin/sh
+# GitHub PR merges update main remotely; local pushes must target work branches.
+while read -r local_ref local_oid remote_ref remote_oid; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    # A new repository needs its reviewed governance-only root commit once.
+    if [ "$remote_oid" = "0000000000000000000000000000000000000000" ] &&
+       [ "$(git rev-list --count "$local_oid")" = "1" ]; then
+      unexpected=$(git ls-tree -r --name-only "$local_oid" | grep -Ev '^(\.gitignore|\.gitattributes|CONTRIBUTING\.md|docs/GITHUB_WORKFLOW\.md)$' || true)
+      if [ -z "$unexpected" ]; then
+        continue
+      fi
+    fi
+    echo 'Direct pushes to main are blocked. Push a feature/fix branch and merge a reviewed PR after CI passes.' >&2
+    exit 1
+  fi
+done

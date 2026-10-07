@@ -1,0 +1,92 @@
+services:
+  openclaw-gateway:
+    image: ghcr.io/openclaw/openclaw:2026.9.6
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      HOME: /home/node
+      OPENCLAW_HOME: /home/node
+      OPENCLAW_STATE_DIR: /home/node/.openclaw
+      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+      OPENCLAW_CONFIG_DIR: /home/node/.openclaw
+      OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
+      OPENCLAW_GATEWAY_PORT: "18789"
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?Generate a gateway token in .env}
+      OPENCLAW_HOOK_TOKEN: ${OPENCLAW_HOOK_TOKEN:?Generate a dedicated hook token in .env}
+      CUSTOM_API_KEY: ${CUSTOM_API_KEY:?Set the model API key in .env}
+      CUSTOM_BASE_URL: ${CUSTOM_BASE_URL:?Set the model URL in .env}
+      CUSTOM_MODEL_ID: ${CUSTOM_MODEL_ID:?Set the model id in .env}
+      AI_MAIL_API_TOKEN: ${AI_MAIL_API_TOKEN:?Set the Ai Mail API token in .env}
+      AI_MAIL_API_URL: ${AI_MAIL_API_URL:-http://host.docker.internal:3000/api/v1}
+      AI_MAIL_TOOL_CONTRACTS_MODULE: file:///opt/tool-contracts.mjs
+      TZ: Europe/Rome
+    ports:
+      - "127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}:18789"
+    volumes:
+      - openclaw_state:/home/node/.openclaw
+      - openclaw_auth:/home/node/.config/openclaw
+      - ../scripts/ai-mail-mcp.mjs:/opt/ai-mail-mcp.mjs:ro
+      - ../scripts/ai-mail.mjs:/opt/ai-mail.mjs:ro
+      - ../scripts/tool-contracts.mjs:/opt/tool-contracts.mjs:ro
+      - ./configure-mcp.mjs:/opt/configure-mcp.mjs:ro
+      - ./enable-crm-tools.mjs:/opt/enable-crm-tools.mjs:ro
+      - ../skills/sc-mail:/home/node/.openclaw/workspace/skills/sc-mail:ro
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789"]
+
+  openclaw-cli:
+    image: ghcr.io/openclaw/openclaw:2026.9.6
+    network_mode: "service:openclaw-gateway"
+    env_file:
+      - .env
+    environment:
+      HOME: /home/node
+      OPENCLAW_HOME: /home/node
+      OPENCLAW_STATE_DIR: /home/node/.openclaw
+      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+      OPENCLAW_CONFIG_DIR: /home/node/.openclaw
+      OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
+      OPENCLAW_GATEWAY_PORT: "18789"
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?Generate a gateway token in .env}
+      OPENCLAW_HOOK_TOKEN: ${OPENCLAW_HOOK_TOKEN:?Generate a dedicated hook token in .env}
+      CUSTOM_API_KEY: ${CUSTOM_API_KEY:?Set the model API key in .env}
+      CUSTOM_BASE_URL: ${CUSTOM_BASE_URL:?Set the model URL in .env}
+      CUSTOM_MODEL_ID: ${CUSTOM_MODEL_ID:?Set the model id in .env}
+      AI_MAIL_API_TOKEN: ${AI_MAIL_API_TOKEN:?Set the Ai Mail API token in .env}
+      AI_MAIL_API_URL: ${AI_MAIL_API_URL:-http://host.docker.internal:3000/api/v1}
+      AI_MAIL_TOOL_CONTRACTS_MODULE: file:///opt/tool-contracts.mjs
+      TZ: Europe/Rome
+      BROWSER: echo
+    volumes:
+      - openclaw_state:/home/node/.openclaw
+      - openclaw_auth:/home/node/.config/openclaw
+      - ../scripts/ai-mail-mcp.mjs:/opt/ai-mail-mcp.mjs:ro
+      - ../scripts/ai-mail.mjs:/opt/ai-mail.mjs:ro
+      - ../scripts/tool-contracts.mjs:/opt/tool-contracts.mjs:ro
+      - ./configure-mcp.mjs:/opt/configure-mcp.mjs:ro
+      - ./enable-crm-tools.mjs:/opt/enable-crm-tools.mjs:ro
+      - ../skills/sc-mail:/home/node/.openclaw/workspace/skills/sc-mail:ro
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    entrypoint: ["node", "dist/index.js"]
+    command: ["--help"]
+    init: true
+    stdin_open: true
+    tty: true
+    depends_on:
+      - openclaw-gateway
+
+volumes:
+  openclaw_state:
+  openclaw_auth:

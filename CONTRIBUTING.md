@@ -10,6 +10,8 @@ SC Mail 使用 GitHub Pull Request 审核代码。不要直接向 `main` 推送�
 4. 等待 CI 成功和代码审核。按反馈修正并重跑相关检查；CI 绿灯不能替代对业务语义、数据迁移和未覆盖场景的审核。
 5. 审核通过后使用 squash merge 合并到 `main`。发布、生产配置写入和部署按各自授权及运维流程执行，不由 PR 合并自动推断完成。
 
+首次克隆后执行 `git config core.hooksPath .githooks`，启用本地直接推送 main 的拦截。GitHub 服务端规则是否强制执行须核实账户套餐；本地 hook 和文档不能代替服务端保护。详情见 [GitHub 流程](docs/GITHUB_WORKFLOW.md)。
+
 ## CI 与安全
 
 GitHub Actions 在 Pull Request 和 `main` push 上使用 Node.js 24、pnpm 11.19.0 锁文件安装及 PostgreSQL 17。CRM 删除、人工 CRM、项目分析回归使用随机命名的隔离数据库和 `.invalid` 合成资料；AI Provider 为假实现，不连接 IMAP，不发送外部通知。CI 不接收生产凭据。

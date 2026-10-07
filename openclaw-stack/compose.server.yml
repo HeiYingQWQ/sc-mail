@@ -1,0 +1,12 @@
+services:
+  openclaw-gateway:
+    networks:
+      default: {}
+      sc_mail_bridge:
+        aliases:
+          - sc-mail-openclaw
+
+networks:
+  sc_mail_bridge:
+    external: true
+    name: sc-mail-link

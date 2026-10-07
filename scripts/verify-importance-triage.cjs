@@ -1,0 +1,25 @@
+const assert = require('node:assert/strict');
+const { IMPORTANCE_TRIAGE_OUTPUT_SCHEMA } = require('../dist/modules/ai/importance-triage.schema.js');
+const { validateAgainstJsonSchema } = require('../dist/modules/ai/json-schema.validator.js');
+const { decideImportanceTriage, retryImportanceTriage } = require('../dist/modules/mail/importance-triage.policy.js');
+
+const result = (importance, intent, overrides = {}) => ({ importance, intent, confidence: 0.9, review_required: false, ...overrides });
+assert.equal(decideImportanceTriage(result('normal', 'routine')), 'quiet');
+assert.equal(decideImportanceTriage(result('low', 'non_actionable')), 'quiet');
+assert.equal(decideImportanceTriage(result('normal', 'customer_inquiry')), 'high');
+assert.equal(decideImportanceTriage(result('low', 'materials_request')), 'high');
+assert.equal(decideImportanceTriage(result('normal', 'important_change')), 'high');
+assert.equal(decideImportanceTriage(result('urgent', 'deadline')), 'urgent');
+assert.equal(decideImportanceTriage(result('high', 'non_actionable')), 'quiet');
+assert.equal(decideImportanceTriage(result('urgent', 'non_actionable')), 'quiet');
+assert.equal(decideImportanceTriage(result('urgent', 'routine')), 'quiet');
+assert.equal(decideImportanceTriage(result('high', 'routine', { confidence: 0.4 })), 'review');
+assert.equal(decideImportanceTriage(result('uncertain', 'uncertain')), 'review');
+assert.equal(decideImportanceTriage(result('high', 'routine', { review_required: true })), 'review');
+assert.deepEqual(retryImportanceTriage(1, 3), { status: 'pending', delaySeconds: 30 });
+assert.deepEqual(retryImportanceTriage(2, 3), { status: 'pending', delaySeconds: 60 });
+assert.deepEqual(retryImportanceTriage(3, 3), { status: 'failed', delaySeconds: 0 });
+const valid = { schema_version: '1', importance: 'high', intent: 'customer_inquiry', confidence: 0.9, reason: 'A customer asks for a quote.', evidence: ['Please send us a quote.'], review_required: false };
+assert.deepEqual(validateAgainstJsonSchema(valid, IMPORTANCE_TRIAGE_OUTPUT_SCHEMA), []);
+assert.ok(validateAgainstJsonSchema({ ...valid, operations: [{ action: 'create', entity_type: 'task' }] }, IMPORTANCE_TRIAGE_OUTPUT_SCHEMA).some(error => error.includes('unexpected property')));
+console.log('M20 action-required notification routing, refusal suppression, uncertainty, retries and strict-output fixtures passed');

@@ -1,0 +1,21 @@
+From: Ai Mail Test <mailbox@example.test>
+To: Ai Mail Test <mailbox@example.test>
+Date: Thu, 24 Sep 2026 10:15:00 +0000
+Message-ID: <fixture-2@example.test>
+In-Reply-To: <fixture-root@example.test>
+References: <fixture-root@example.test>
+Subject: M3 normalizer fixture
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="m3-fixture"
+
+--m3-fixture
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Fixture message body.
+--m3-fixture
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+<p>Fixture message body.</p>
+--m3-fixture--
