@@ -12,7 +12,7 @@ Dashboard 密码仅供登录；OpenClaw MCP 使用 API Token。setup.mjs 将根 
 
 ## 2. 从零接通：本机 Docker Desktop
 
-以下是新安装步骤，PowerShell 命令从项目根目录执行。已有服务升级本轮修复先按 [升级顺序](OPERATIONS.md#迁移及升级) 停旧进程并验收/迁移。先确认 Docker Desktop 正在运行，根目录 `.env` 已配置 IMAP、`IMAP_API_TOKEN`、AI 提供方与密钥。不要将 `.env`、Gateway URL 中的令牌或终端输出的凭据贴进文档、聊天或截图。
+以下是新安装步骤，PowerShell 命令从项目根目录执行。已有服务升级先按 [升级顺序](OPERATIONS.md#迁移及升级) 停旧进程并验收/迁移。先确认 Docker Desktop 正在运行，根目录 `.env` 已配置 IMAP、`IMAP_API_TOKEN`、AI 提供方与密钥。不要将 `.env`、Gateway URL 中的令牌或终端输出的凭据贴进文档、聊天或截图。
 
 ### 第一步：启动 SC Mail
 
@@ -86,7 +86,7 @@ node openclaw-stack/enable-events.mjs
 
 分类及必通知/静默规则统一见 [发件规则](MAIL_PROCESSING.md#发件规则与通知)，租约和 complete 字段见 [事件接口](API_REFERENCE.md#事件与通知)。后台不自行应用业务建议，不自动给客户发信。Agent 临时离线事件仍保留；unknown 投递不要绕过队列另发。
 
-不因配置成功自动发送测试消息。实际手机问答、真实新来信通知正反例和渠道投递需要单独验收，当前缺口见 [Problem](../README.md#未完成事项)。
+不因配置成功自动发送测试消息。实际手机问答、真实新来信通知正反例和渠道投递需要单独验收，当前缺口见 [README 未完成事项](../README.md#未完成事项)。
 
 ## 4. 调度归属
 
