@@ -94,4 +94,4 @@ V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代�
 - GitHub API 实查保护/Rulesets 均为 403 套餐限制；不升级套餐或公开仓库，不更改 npm 版本、tag、业务代码或迁移。
 - 本次验证：19 份 Markdown 的 107 个本地链接/锚点、14 个历史 Git 入口、12 版行数、根文档 <5 KB、hook 9 场景及 10 段 PowerShell 语法通过；模板/npm 版本未变。
 - 16 段 API/邮件/Agent 契约示例完整保留；提交 02a25de 的完整 GitHub CI 成功，独立审查尚未完成，PR 保留在工作分支。
-- 证据：[PR #3](https://github.com/HeiYingQWQ/sc-mail/pull/3)、[已通过 CI](https://github.com/HeiYingQWQ/sc-mail/actions/runs/37649847626)、[当前专题目录](README.md)、[合并规则](../AGENTS.md#github-分支与合并)。
+- 证据：[PR #3](https://github.com/HeiYingQWQ/sc-mail/pull/3)、[已通过 CI](https://github.com/HeiYingQWQ/sc-mail/actions/runs/37649847626)、[当前专题目录](README.md)、[合并规则](../AGENTS.md#github-分支与合并)、[推送 hook](../.githooks/pre-push)。
