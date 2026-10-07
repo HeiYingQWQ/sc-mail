@@ -6,13 +6,13 @@
 
 ## 1. 接入职责与凭据
 
-SC Mail 独立同步和保存事实，OpenClaw 承接手机对话、MCP 工具调用和事件处理；安装 Skill、MCP 接通、事件唤醒、主动投递分别配置。整体数据流见 [当前架构](../PROJECT_DEVELOPMENT.md#运行结构)，工具契约见 [Agent 接口](M13_AGENT_INTEGRATION.md)。
+SC Mail 独立同步和保存事实，OpenClaw 承接手机对话、MCP 工具调用和事件处理；安装 Skill、MCP 接通、事件唤醒、主动投递分别配置。整体数据流见 [当前架构](../PROJECT_DEVELOPMENT.md#运行结构)，工具契约见 [Agent 接口](API_REFERENCE.md#通用查询与适配)。
 
 Dashboard 密码仅供登录；OpenClaw MCP 使用 API Token。setup.mjs 将根 .env 的 IMAP_API_TOKEN 复制为 openclaw-stack/.env 的 AI_MAIL_API_TOKEN，并生成独立 Gateway/hook 凭据。不要把密码与 Token 混用。
 
 ## 2. 从零接通：本机 Docker Desktop
 
-以下是新安装步骤，PowerShell 命令从项目根目录执行。已有服务升级本轮修复先按 [升级顺序](REVIEW_FIXES_2026-10-01.md#迁移及升级) 停旧进程并验收/迁移。先确认 Docker Desktop 正在运行，根目录 `.env` 已配置 IMAP、`IMAP_API_TOKEN`、AI 提供方与密钥。不要将 `.env`、Gateway URL 中的令牌或终端输出的凭据贴进文档、聊天或截图。
+以下是新安装步骤，PowerShell 命令从项目根目录执行。已有服务升级本轮修复先按 [升级顺序](OPERATIONS.md#迁移及升级) 停旧进程并验收/迁移。先确认 Docker Desktop 正在运行，根目录 `.env` 已配置 IMAP、`IMAP_API_TOKEN`、AI 提供方与密钥。不要将 `.env`、Gateway URL 中的令牌或终端输出的凭据贴进文档、聊天或截图。
 
 ### 第一步：启动 SC Mail
 
@@ -84,15 +84,15 @@ node openclaw-stack/enable-events.mjs
 
 新来信持久化、分类和异步重要性分流后，合格候选建立 AgentEvent；worker 用事件 ID 回调唤醒 OpenClaw，Agent 通过 MCP 领取/完成，通知请求写 NotificationDelivery，worker 再调用受限 relay 投递 WhatsApp。回调成功、事件完成、通知入队和渠道接受分别验证。
 
-分类及必通知/静默规则统一见 [发件规则](M20_SENDER_RULES.md)，租约和 complete 字段见 [事件接口](AGENT_EVENTS_API.md)。后台不自行应用业务建议，不自动给客户发信。Agent 临时离线事件仍保留；unknown 投递不要绕过队列另发。
+分类及必通知/静默规则统一见 [发件规则](MAIL_PROCESSING.md#发件规则与通知)，租约和 complete 字段见 [事件接口](API_REFERENCE.md#事件与通知)。后台不自行应用业务建议，不自动给客户发信。Agent 临时离线事件仍保留；unknown 投递不要绕过队列另发。
 
-不因配置成功自动发送测试消息。实际手机问答、真实新来信通知正反例和渠道投递需要单独验收，当前缺口见 [Problem](../Problem.md)。
+不因配置成功自动发送测试消息。实际手机问答、真实新来信通知正反例和渠道投递需要单独验收，当前缺口见 [Problem](../README.md#未完成事项)。
 
 ## 4. 调度归属
 
 SC Mail worker 创建 DAILY_BRIEF，时间由根 .env 管理，新安装默认关闭，不在 OpenClaw 重复建日报。事件 webhook 不受宿主定时检查时刻限制。
 
-OpenClaw 的 heartbeat、Skill Workshop 和记忆任务属于宿主。2026-09-30 本机记录曾禁用 system-owned heartbeat，并使用可编辑的固定时刻检查；这些是历史配置，不代表新安装自动建立或当前仍存在。维护前查 Control UI/cron list 的实际任务、所有者和时区，避免重复启用。宿主任务不是 SC Mail 邮件计数或投递状态的依据。
+OpenClaw 的 heartbeat、Skill Workshop 和记忆任务属于宿主；维护前查 Control UI/cron list 的实际任务、所有者和时区，避免重复启用。宿主任务不是 SC Mail 邮件计数或投递状态的依据。
 
 ## 5. 常见故障与排查顺序
 
@@ -106,6 +106,6 @@ OpenClaw 的 heartbeat、Skill Workshop 和记忆任务属于宿主。2026-09-30
 
 ## 6. 相关文档与能力限制
 
-实时健康用 compose ps、/health 和 integrations/status 查询。已有本机验收结果以 [README](../README.md) 及 [历史归档](archive/README.md) 为准；不把历史 healthy 或 MCP probe 代替当前服务/手机端到端验收。
+实时健康用 compose ps、/health 和 integrations/status 查询。历史验收结果只见 [版本日志](CHANGELOG_V0.md)；不把历史 healthy 或 MCP probe 代替当前服务/手机端到端验收。
 
-通用个人助手模板与轻量记忆安装见 [桥接目录](../openclaw-stack/README.md)：默认只使用仓库内 `openclaw-stack/agent-templates`，不使用被忽略的本机私有 `agent-files/`。非覆盖式安装器只补 workspace 中缺少的模板；已有本机文件及运行中的 `MEMORY.md`、`memory/` 记录均保留。回调、备份、删除和受控恢复见 [运维](M14_OPERATIONS.md)，运行时指导见 [sc-mail Skill](../skills/sc-mail/SKILL.md)。同一 Linux Docker 主机使用 [部署 Skill](../skills/sc-mail-openclaw-deploy/SKILL.md)，该路径尚未在用户服务器端到端部署。不同主机需适配可达 HTTPS URL，不直接复用 Docker Desktop 地址。
+通用个人助手模板与轻量记忆安装见 [桥接目录](../openclaw-stack/README.md)：默认只使用仓库内 `openclaw-stack/agent-templates`，不使用被忽略的本机私有 `agent-files/`。非覆盖式安装器只补 workspace 中缺少的模板；已有本机文件及运行中的 `MEMORY.md`、`memory/` 记录均保留。回调、备份、删除和受控恢复见 [运维](OPERATIONS.md)，运行时指导见 [sc-mail Skill](../skills/sc-mail/SKILL.md)。同一 Linux Docker 主机使用 [部署 Skill](../skills/sc-mail-openclaw-deploy/SKILL.md)，该路径尚未在用户服务器端到端部署。不同主机需适配可达 HTTPS URL，不直接复用 Docker Desktop 地址。

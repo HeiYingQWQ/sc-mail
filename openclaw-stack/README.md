@@ -2,14 +2,14 @@
 
 独立 Compose 项目，镜像固定 2026.9.6，Gateway 端口只绑定回环地址，保留独立状态卷。不要挂载宿主 Docker socket；停止保留状态，不用 down -v。SC Mail 的 API/CLI/MCP/Agent 标识 ai-mail 为兼容名称。
 
-`openclaw_state` 挂载 `/home/node/.openclaw`，保存配置、workspace、会话和凭据。原 `openclaw_auth` 仅挂载旧配置目录 `/home/node/.config/openclaw`，本机核实为空且没有其他依赖后已从 Compose 移除。已有安装只在确认旧卷为空、没有其他容器使用时才可删除；不要按名称批量删除卷。
+`openclaw_state` 挂载 `/home/node/.openclaw`，保存配置、workspace、会话和凭据。Compose 不再声明旧 openclaw_auth 卷；已有安装只有在确认旧卷为空且没有其他容器使用时才可删除，不要按名称批量删除卷。
 
 ## 接入入口
 
-- 新安装、onboarding、MCP/Skill、配对、事件和 WhatsApp sender：统一按 [Docker Desktop 教程](../docs/OPENCLAW_INTEGRATION_GUIDE.md#2-从零接通本机-docker-desktop)。
+- 新安装、onboarding、MCP/Skill、配对、事件和 WhatsApp sender：统一按 [Docker Desktop 教程](../docs/AGENT_INTEGRATION.md#2-从零接通本机-docker-desktop)。
 - 同一 Linux Docker 主机：按 [部署 Skill](../skills/sc-mail-openclaw-deploy/SKILL.md)，使用私网 overlay；服务器端到端部署未验证。
-- API/Token、业务规则与正文范围：[Agent 契约](../docs/M13_AGENT_INTEGRATION.md) 与 [运行 Skill](../skills/sc-mail/SKILL.md)。
-- 回调/通知状态、备份/删除：[运维](../docs/M14_OPERATIONS.md)。当前部署状态只见 [根 README](../README.md)。
+- API/Token、业务规则与正文范围：[Agent 契约](../docs/API_REFERENCE.md#通用查询与适配) 与 [运行 Skill](../skills/sc-mail/SKILL.md)。
+- 回调/通知状态、备份/删除：[运维](../docs/OPERATIONS.md)。当前部署状态只见 [根 README](../README.md)。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -41,4 +41,4 @@ $agentTemplates = (Resolve-Path 'openclaw-stack/agent-templates').Path
 
 轻量记忆为普通 Markdown，每文件 5,000 UTF-8 字节指导上限，按主题去重更新；installer 校验种子，不是运行时写拦截器。配置启用本地关键词搜索，不需 embedding API，关闭自动 transcript-to-memory hook、flush 和 dreaming 日记；会话记录与 curated memory 分开。不要因文档清理删除用户偏好、有效承诺或运行记忆。
 
-宿主调度与 SC Mail 日报分开维护，所有者/实际任务先查 Control UI，说明见 [调度归属](../docs/OPENCLAW_INTEGRATION_GUIDE.md#4-调度归属)。
+宿主调度与 SC Mail 日报分开维护，所有者/实际任务先查 Control UI，说明见 [调度归属](../docs/AGENT_INTEGRATION.md#4-调度归属)。
