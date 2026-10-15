@@ -18,10 +18,15 @@ export const CRM_TOOL_NAMES = Object.freeze([
   'cancel_project_analysis', 'retry_project_analysis', 'set_message_project',
 ]);
 
+export const DELIVERY_TOOL_NAMES = Object.freeze([
+  'list_delivery_failures', 'list_system_mail_senders',
+  'add_system_mail_sender', 'delete_system_mail_sender',
+]);
+
 const allowedHttpHosts = new Set(['localhost', '127.0.0.1', 'host.docker.internal', 'sc-mail-api']);
 
 function requireArray(value, label) {
-  if (!Array.isArray(value)) throw new Error(`Existing OpenClaw configuration is missing ${label}; run the initial MCP setup before enabling scoped CRM tools.`);
+  if (!Array.isArray(value)) throw new Error(`Existing OpenClaw configuration is missing ${label}; run the initial MCP setup before enabling scoped SC Mail tools.`);
   return value;
 }
 
@@ -55,8 +60,8 @@ function assertNoScopedDeny(config, scopedToolNames) {
   }
 }
 
-export function validateOpenClawConfig(config, schemaRegistry, token = process.env.AI_MAIL_API_TOKEN) {
-  for (const name of CRM_TOOL_NAMES) {
+function validateScopedConfig(config, schemaRegistry, token, toolNames) {
+  for (const name of toolNames) {
     if (!Object.hasOwn(schemaRegistry, name)) throw new Error(`Shared tool contract is missing ${name}.`);
   }
   const globalAllow = requireArray(config.tools?.allow, 'tools.allow');
@@ -73,21 +78,21 @@ export function validateOpenClawConfig(config, schemaRegistry, token = process.e
   validatePrivateApiUrl(server.env.AI_MAIL_API_URL);
   if (token && JSON.stringify(config).includes(token)) throw new Error('Refusing to persist a literal API token in OpenClaw configuration.');
   const serverInclude = requireArray(server.toolFilter?.include, "mcp.servers['ai-mail'].toolFilter.include");
-  assertNoScopedDeny(config, CRM_TOOL_NAMES);
+  assertNoScopedDeny(config, toolNames);
   return { globalAllow, agentAllow, serverInclude };
 }
 
-export function applyScopedCrmTools(config, schemaRegistry = CONTRACT_TOOL_SCHEMAS, token = process.env.AI_MAIL_API_TOKEN) {
-  const { globalAllow, agentAllow, serverInclude } = validateOpenClawConfig(config, schemaRegistry, token);
-  const prefixed = CRM_TOOL_NAMES.map(name => `ai-mail__${name}`);
+function applyScopedTools(config, schemaRegistry, token, toolNames) {
+  const { globalAllow, agentAllow, serverInclude } = validateScopedConfig(config, schemaRegistry, token, toolNames);
+  const prefixed = toolNames.map(name => `ai-mail__${name}`);
   const appendMissing = (existing, additions) => [...existing, ...additions.filter(value => !existing.includes(value))];
   config.tools.allow = appendMissing(globalAllow, prefixed);
   config.agents.entries['ai-mail'].tools.allow = appendMissing(agentAllow, prefixed);
-  config.mcp.servers['ai-mail'].toolFilter.include = appendMissing(serverInclude, CRM_TOOL_NAMES);
-  return { changed: true, toolNames: [...CRM_TOOL_NAMES] };
+  config.mcp.servers['ai-mail'].toolFilter.include = appendMissing(serverInclude, toolNames);
+  return { changed: true, toolNames: [...toolNames] };
 }
 
-export async function enableScopedCrmToolsFile(configPath, {
+async function enableScopedToolsFile(configPath, toolNames, {
   schemaRegistry = CONTRACT_TOOL_SCHEMAS,
   token = process.env.AI_MAIL_API_TOKEN,
   log = () => {},
@@ -96,7 +101,7 @@ export async function enableScopedCrmToolsFile(configPath, {
   const original = await readFile(configPath, 'utf8');
   let config;
   try { config = JSON.parse(original); } catch { throw new Error('The OpenClaw configuration is not valid JSON; no changes were made.'); }
-  const result = applyScopedCrmTools(config, schemaRegistry, token);
+  const result = applyScopedTools(config, schemaRegistry, token, toolNames);
   const serialized = `${JSON.stringify(config, null, 2)}\n`;
   if (token && serialized.includes(token)) throw new Error('Refusing to write a literal API token into OpenClaw configuration.');
   if (serialized === original) {
@@ -119,6 +124,23 @@ export async function enableScopedCrmToolsFile(configPath, {
   const output = { enabled: true, changed: true, count: result.toolNames.length, toolNames: result.toolNames, backup: backupPath };
   log(output);
   return output;
+}
+
+// The public entry points use fixed scopes; callers cannot grant arbitrary tools.
+export function validateOpenClawConfig(config, schemaRegistry, token = process.env.AI_MAIL_API_TOKEN) {
+  return validateScopedConfig(config, schemaRegistry, token, CRM_TOOL_NAMES);
+}
+
+export function applyScopedCrmTools(config, schemaRegistry = CONTRACT_TOOL_SCHEMAS, token = process.env.AI_MAIL_API_TOKEN) {
+  return applyScopedTools(config, schemaRegistry, token, CRM_TOOL_NAMES);
+}
+
+export function enableScopedCrmToolsFile(configPath, options) {
+  return enableScopedToolsFile(configPath, CRM_TOOL_NAMES, options);
+}
+
+export function enableScopedDeliveryToolsFile(configPath, options) {
+  return enableScopedToolsFile(configPath, DELIVERY_TOOL_NAMES, options);
 }
 
 async function main() {

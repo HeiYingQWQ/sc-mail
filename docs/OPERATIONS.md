@@ -184,6 +184,8 @@ pnpm prisma:validate
 pnpm typecheck
 pnpm build
 pnpm verify:tool-contracts
+pnpm verify:openclaw-delivery
+pnpm verify:logging
 pnpm verify:dashboard
 pnpm verify:review-fixes
 pnpm verify:contact-resolver
@@ -218,3 +220,5 @@ CI 增加同步恢复、分流租约、规则/Schema/任务、系统发件人、
 pnpm verify:backup-postgres 要求 DATABASE_URL 指向独立本机 sc_mail_ci 和 BACKUP_RESTORE_ALLOW_LOCAL_DB_CREATE=1。它创建合成源库、保存/复制文件、删除源库，再恢复原文件并核对 MIME、CRM/任务来源、通知 unknown 状态；损坏文件须失败，临时库/文件自动清理。
 
 本机可用 docker compose -p sc-mail-p0-tests -f scripts/fixtures/p0-postgres.yml up -d --wait 创建专用 PostgreSQL 17（127.0.0.1:55439，tmpfs，无生产卷）。将 COMPOSE_FILE 设为该文件绝对路径，COMPOSE_PROJECT_NAME=sc-mail-p0-tests，DATABASE_URL=postgresql://postgres:isolated-test-only@127.0.0.1:55439/sc_mail_ci。测试完成用相同 -p/-f 执行 down。该口令仅用于合成可丢弃实例；不得复用到生产。完整应用/外部渠道灾难恢复仍另行验收。
+
+投递工具隔离回归仅改写临时 OpenClaw 合成配置，保留原 deny/relay/模型/其他 Agent；真实 MCP 子进程只连接本机 HTTP fixture。日志回归启动无数据库的最小 Nest/Express 服务，验证根/嵌套路由、health、GET/POST、404 和敏感字段脱敏，并拒绝旧 wildcard 转换警告；不启动主应用或读取生产配置。两项均纳入 CI。

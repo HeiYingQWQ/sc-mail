@@ -6,6 +6,7 @@ import { PrismaModule } from './database/prisma.module';
 import { HealthModule } from './modules/health/health.module';
 import { MailModule } from './modules/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { createLoggingOptions } from './logging.config';
 
 const envSchema = Joi.object({
   DATABASE_URL: Joi.string()
@@ -132,26 +133,7 @@ function validateWebhookUrl(value: string, helpers: Joi.CustomHelpers) {
     }),
     LoggerModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        pinoHttp: {
-          level: config.get<string>('LOG_LEVEL', 'info'),
-          redact: {
-            paths: [
-              'req.headers.authorization',
-              'req.body',
-              'req.headers.cookie',
-              'res.headers.set-cookie',
-              '*.password',
-              '*.token',
-              '*.clientSecret',
-              '*.apiKey',
-              '*.openaiApiKey',
-              'OPENAI_API_KEY',
-            ],
-            censor: '[REDACTED]',
-          },
-        },
-      }),
+      useFactory: createLoggingOptions,
     }),
     PrismaModule,
     HealthModule,
