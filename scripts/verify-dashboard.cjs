@@ -924,6 +924,163 @@ test('mobile styles keep the named logout control available', () => {
   assert.match(css, /@media\(max-width:680px\)[\s\S]*\.sidebar-bottom\s*\{\s*display:\s*flex/);
 });
 
+const recoveryItem = (extra = {}) => ({ id: 'triage-1', status: 'failed', sourceMessageId: 'source-1', sourceMessage: { subject: '合成处理失败邮件' }, attempts: 3, maxAttempts: 3, lastErrorCode: 'AI_TIMEOUT', updatedAt: '2026-10-15T10:00:00Z', ...extra });
+function recoveryHarness(handler = () => undefined, item = recoveryItem()) {
+  return harness((url, options = {}) => {
+    const custom = handler(url, options); if (custom !== undefined) return custom;
+    if (url.includes('/importance-triage?')) return response({ total: 1, triages: [item] });
+    if (url.includes('/companies')) return response({ total: 0, companies: [] });
+    return response({ total: 0 });
+  });
+}
+const recoveryPanel = h => find(h.app.content, node => node.classList.contains('recovery-panel'));
+const confirmationPanel = h => find(h.app.content, node => node.classList.contains('triage-retry-confirmation'));
+
+test('recovery entry loads failed triage without writes and requires an inline confirmation', async () => {
+  const h = recoveryHarness(); await h.app.loadPage('audit');
+  assert.ok(h.requests.some(r => r.url.includes('importance-triage?status=failed&limit=20&offset=0')));
+  assert.equal(h.requests.filter(r => r.options.method === 'POST').length, 0);
+  await fire(button(recoveryPanel(h), '重新判断此邮件'));
+  assert.match(confirmationPanel(h).textContent, /可能.*通知 WhatsApp/);
+  assert.equal(h.requests.filter(r => r.options.method === 'POST').length, 0);
+  await fire(button(confirmationPanel(h), '取消'));
+  assert.equal(h.requests.filter(r => r.options.method === 'POST').length, 0);
+  assert.equal(h.confirmCalls(), 0);
+});
+
+test('recovery retries one target with stable operationId and reports queued rather than completed', async () => {
+  let retried = false; const writes = [];
+  const h = recoveryHarness((url, options) => {
+    if (options.method === 'POST') { writes.push({ url, body: JSON.parse(options.body) }); retried = true; return response({ status: 'pending' }); }
+    if (url.includes('/importance-triage?') && retried) return response({ total: 1, triages: [recoveryItem({ status: 'pending' })] });
+  });
+  await h.app.loadPage('audit'); await fire(button(recoveryPanel(h), '重新判断此邮件')); await fire(button(confirmationPanel(h), '确认重新排队'));
+  assert.equal(writes.length, 1); assert.equal(writes[0].url, '/api/v1/mail/importance-triage/triage-1/retry');
+  assert.deepEqual(Object.keys(writes[0].body), ['operationId']); assert.ok(writes[0].body.operationId);
+  assert.match(recoveryPanel(h).textContent, /不代表判断完成或通知已送达/);
+  assert.ok(!descendants(recoveryPanel(h)).some(n => n.tagName === 'BUTTON' && n.textContent === '重新判断此邮件'));
+});
+
+test('lost retry response reuses the operationId across list reload', async () => {
+  const writes = []; const h = recoveryHarness((url, options) => {
+    if (options.method === 'POST') { writes.push(JSON.parse(options.body)); return writes.length === 1 ? Promise.reject(new TypeError('response lost')) : response({ status: 'pending' }); }
+  });
+  await h.app.loadPage('audit'); await fire(button(recoveryPanel(h), '重新判断此邮件')); await fire(button(confirmationPanel(h), '确认重新排队'));
+  assert.match(recoveryPanel(h).textContent, /尚未确认入队结果/);
+  await h.app.loadPage('audit'); await fire(button(recoveryPanel(h), '重新判断此邮件')); await fire(button(confirmationPanel(h), '确认重新排队'));
+  assert.equal(writes.length, 2); assert.equal(writes[0].operationId, writes[1].operationId);
+});
+
+test('in-flight duplicate retry submits once and late completion cannot replace another page', async () => {
+  const pending = deferred(); let writes = 0;
+  const h = recoveryHarness((_url, options) => { if (options.method === 'POST') { writes++; return pending.promise; } });
+  await h.app.loadPage('audit'); await fire(button(recoveryPanel(h), '重新判断此邮件'));
+  const confirm = button(confirmationPanel(h), '确认重新排队'); const first = fire(confirm); await flush(); await fire(confirm);
+  assert.equal(writes, 1); await h.app.loadPage('companies'); const before = h.app.content.textContent;
+  pending.resolve(response({ status: 'pending' })); await first;
+  assert.equal(h.app.content.textContent, before); assert.equal(h.app.state.page, 'companies');
+});
+
+for (const status of [200, 401]) test(`retry response ${status} from an old session cannot affect a new login`, async () => {
+  const pending = deferred();
+  const h = recoveryHarness((url, options) => {
+    if (url.endsWith('/retry') && options.method === 'POST') return pending.promise;
+    if (url.endsWith('/auth/login')) return response({ user: { id: 'new-session', mustChangePassword: false } });
+  });
+  await h.app.loadPage('audit'); await fire(button(recoveryPanel(h), '重新判断此邮件'));
+  const write = fire(button(confirmationPanel(h), '确认重新排队')); await flush();
+  await fire(h.get('#logout'));
+  h.get('#email').value = 'synthetic@session.invalid'; h.get('#password').value = 'synthetic-only';
+  await fire(h.get('#login-form'), 'submit'); await h.app.loadPage('companies');
+  assert.equal(h.app.state.user.id, 'new-session');
+  const before = h.app.content.textContent, logouts = h.requests.filter(r => r.url.endsWith('/auth/logout')).length;
+  pending.resolve(response(status === 401 ? { message: 'Old session expired' } : { status: 'pending' }, status)); await write;
+  assert.equal(h.app.state.user.id, 'new-session'); assert.equal(h.app.content.textContent, before);
+  assert.equal(h.get('#login').classList.contains('hidden'), true);
+  assert.equal(h.requests.filter(r => r.url.endsWith('/auth/logout')).length, logouts, 'old response must not revoke the new cookie session');
+});
+
+test('retry unauthorized response in the current session still returns to login', async () => {
+  const h = recoveryHarness((url, options) => url.endsWith('/retry') && options.method === 'POST' ? response({}, 401) : undefined);
+  await h.app.loadPage('audit'); await fire(button(recoveryPanel(h), '重新判断此邮件')); await fire(button(confirmationPanel(h), '确认重新排队'));
+  assert.equal(h.app.state.user, null); assert.equal(h.get('#login').classList.contains('hidden'), false);
+  assert.equal(h.requests.filter(r => r.url.endsWith('/auth/logout')).length, 1);
+});
+
+test('recovery status filter resets offset and ignores a stale response', async () => {
+  const late = deferred(); let statusReads = 0;
+  const h = recoveryHarness((url) => {
+    if (url.includes('status=review') && ++statusReads === 1) return late.promise;
+    if (url.includes('status=pending')) return response({ total: 0, triages: [] });
+  });
+  await h.app.loadPage('audit'); h.app.state.offsets.recovery = 20;
+  const select = find(recoveryPanel(h), n => n.tagName === 'SELECT'); select.value = 'review'; await fire(select, 'change');
+  select.value = 'pending'; await fire(select, 'change'); await flush();
+  assert.equal(h.app.state.offsets.recovery, 0);
+  late.resolve(response({ total: 1, triages: [recoveryItem({ sourceMessage: { subject: '不应显示的旧请求' } })] })); await flush();
+  assert.doesNotMatch(recoveryPanel(h).textContent, /不应显示/);
+});
+
+test('recovery paginates within the selected status and distinguishes read errors from empty data', async () => {
+  let fail = false; const h = recoveryHarness(url => {
+    if (url.includes('/importance-triage?')) return fail ? response({}, 503) : response({ total: 21, triages: [recoveryItem()] });
+  });
+  await h.app.loadPage('audit'); await fire(button(recoveryPanel(h), '下一页')); await flush();
+  assert.ok(h.requests.some(r => r.url.includes('status=failed&limit=20&offset=20')));
+  fail = true; await fire(button(recoveryPanel(h), '刷新处理记录')); await flush();
+  assert.match(recoveryPanel(h).textContent, /读取失败/); assert.doesNotMatch(recoveryPanel(h).textContent, /没有处理记录/);
+  assert.match(h.app.content.textContent, /邮件分类统计/);
+});
+
+test('successful retry followed by read failure keeps queued acknowledgement and has no second write', async () => {
+  let retried = false, writes = 0; const h = recoveryHarness((url, options) => {
+    if (options.method === 'POST') { retried = true; writes++; return response({ status: 'pending' }); }
+    if (retried && url.includes('/importance-triage?')) return response({}, 503);
+  });
+  await h.app.loadPage('audit'); await fire(button(recoveryPanel(h), '重新判断此邮件')); await fire(button(confirmationPanel(h), '确认重新排队'));
+  assert.match(recoveryPanel(h).textContent, /已提交重新排队请求/); assert.match(recoveryPanel(h).textContent, /读取失败/);
+  assert.equal(writes, 1);
+});
+
+test('recovery offers no retry for pending, processing, quiet or unknown states', async () => {
+  for (const status of ['pending', 'processing', 'quiet', 'unknown']) {
+    const h = recoveryHarness(undefined, recoveryItem({ status })); await h.app.loadPage('audit');
+    assert.ok(!descendants(recoveryPanel(h)).some(n => n.tagName === 'BUTTON' && n.textContent === '重新判断此邮件'));
+  }
+});
+
+test('concurrent triage conflict has a readable refresh instruction and no success claim', async () => {
+  const h = recoveryHarness((_url, options) => options.method === 'POST' ? response({ code: 'TRIAGE_RETRY_REQUIRES_REVIEW_OR_FAILED' }, 409) : undefined);
+  await h.app.loadPage('audit'); await fire(button(recoveryPanel(h), '重新判断此邮件')); await fire(button(confirmationPanel(h), '确认重新排队'));
+  assert.match(recoveryPanel(h).textContent, /状态已变化/); assert.doesNotMatch(recoveryPanel(h).textContent, /已提交重新排队请求/);
+});
+
+test('review guidance explains classification conflict before collapsed technical evidence', async () => {
+  const h = harness(() => response({ id: 'review-1', status: 'pending', reasonCode: 'AI_CLASSIFICATION_DISAGREEMENT', sourceMessage: { id: 'source-1', subject: '分类冲突', classification: 'BUSINESS_HUMAN' }, proposedChangeJson: { currentClassification: 'BUSINESS_HUMAN', suggestedClassification: 'MARKETING', evidence: ['原文证据'], summary: '模型建议摘要' } }));
+  await h.app.openReview('review-1'); const text = h.app.dialogContent.textContent;
+  assert.match(text, /尚未替换当前分类/); assert.match(text, /建议下一步/); assert.match(text, /保存的分类商务邮件模型建议营销广告/); assert.match(text, /原文证据/);
+  const details = find(h.app.dialogContent, n => n.tagName === 'DETAILS'); assert.equal(details.open, false);
+  assert.ok(text.indexOf('为什么需要确认') < text.indexOf('查看原始建议与技术信息'));
+});
+
+test('unknown and prototype-shaped review reasons remain readable and untrusted proposal text stays inert', async () => {
+  for (const reasonCode of ['NEW_REASON', '__proto__', 'constructor']) {
+    const h = harness(() => response({ id: 'review-1', status: 'resolved', reasonCode, entityType: 'email_message', proposedChangeJson: { summary: '<img src=x onerror=alert(1)>' } }));
+    await h.app.openReview('review-1');
+    assert.match(h.app.dialogContent.textContent, /尚无专门说明/); assert.match(h.app.dialogContent.textContent, /当时的复核原因/);
+    assert.doesNotMatch(h.app.dialogContent.textContent, /建议下一步/);
+    assert.equal(descendants(h.app.dialogContent).filter(n => n.tagName === 'IMG').length, 0);
+  }
+});
+
+test('deleted-source review guidance blocks source navigation and avoids an assignment recommendation', async () => {
+  const h = harness(() => response({ id: 'review-1', status: 'pending', reasonCode: 'FACT_REANALYSIS_REVIEW_REQUIRED', isSourceDeleted: true, sourceMessage: { id: 'deleted', subject: '来源已删' }, proposedChangeJson: {} }));
+  await h.app.openReview('review-1');
+  assert.match(h.app.dialogContent.textContent, /来源邮件已删除或不可读取/);
+  assert.equal(button(h.app.dialogContent, '来源邮件已删除').disabled, true);
+});
+
+
 (async () => {
   let failed = 0;
   for (const { name, run } of tests) {

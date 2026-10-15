@@ -36,7 +36,7 @@
     failed: '失败', idle: '空闲', not_started: '尚未开始', reconciling: '对账中' };
   const state = {
     user: null, page: 'overview', offsets: {}, projects: [], companies: [], contacts: [],
-    filters: { inboxClassification: 'BUSINESS_HUMAN', inboxDate: '', sentDate: '', sentTo: '', taskStatus: '', reviewStatus: 'pending', timelineProject: '', contactSearch: '', deliveryFailureDate: '' },
+    filters: { inboxClassification: 'BUSINESS_HUMAN', inboxDate: '', sentDate: '', sentTo: '', taskStatus: '', reviewStatus: 'pending', recoveryStatus: 'failed', timelineProject: '', contactSearch: '', deliveryFailureDate: '' },
     timezone: null,
   };
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -48,6 +48,8 @@
   let dialogRequest = null;
   let sessionSequence = 0;
   let projectAnalysisTimer = null;
+  const triageRetryOperations = new Map();
+  const triageRetriesInFlight = new Set();
 
   function requestScope() {
     const controller = new AbortController();
@@ -200,6 +202,7 @@
   }
   function query(values) { const params = new URLSearchParams(); for (const [key, value] of Object.entries(values)) if (value !== undefined && value !== null && value !== '') params.set(key, value); return params.toString(); }
   async function api(path, options = {}) {
+    const session = sessionSequence;
     const headers = new Headers(options.headers || {});
     if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     let response;
@@ -210,7 +213,7 @@
     }
     const type = response.headers.get('content-type') || '';
     const body = type.includes('json') ? await response.json() : await response.text();
-    if (options.signal?.aborted) { const error = new Error('请求已取消'); error.name = 'AbortError'; throw error; }
+    if (options.signal?.aborted || session !== sessionSequence) { const error = new Error('请求已取消'); error.name = 'AbortError'; throw error; }
     if (!response.ok) {
       if (response.status === 401) logout();
       throw new Error(formatApiError(body, response.status));
@@ -245,6 +248,7 @@
       PROJECT_ANALYSIS_SCOPE_TOO_LARGE: '所选日期范围内的候选邮件超过本次批次上限，请缩小日期范围后再分析。',
       PROJECT_ANALYSIS_LIMIT_EXCEEDED: '本次候选邮件数量超出上限，请缩小日期范围。',
       JOB_NOT_RETRYABLE: '此分析任务当前不能重试。请刷新任务状态后再试。',
+      TRIAGE_RETRY_REQUIRES_REVIEW_OR_FAILED: '这条记录的状态已变化，不能再次排队。请刷新列表查看最新进度。',
       INVALID_DELIVERY_FAILURE_DATE: '业务日期格式无效，请选择 YYYY-MM-DD 日期后重试。',
       SYSTEM_MAIL_SENDER_INVALID_EMAIL: '系统发件地址格式无效，请检查邮箱地址。',
       SYSTEM_MAIL_SENDER_NOT_FOUND: '这个系统发件地址已被其他操作移除，请刷新列表。',
@@ -277,6 +281,7 @@
     $('#app').classList.remove('hidden');
   }
   function showLogin() {
+    triageRetryOperations.clear();
     state.user = null;
     state.timezone = null;
     pageRequest?.abort(); dialogRequest?.abort();
@@ -836,24 +841,26 @@
       select.addEventListener('change', () => { state.filters.reviewStatus = select.value; });
       append(toolbar, select, button('筛选', () => { state.offsets.reviews = 0; loadPage('reviews'); }, 'button secondary')); content.append(toolbar);
       const box = card('复核项目', `${data.total} 条`);
-      box.append(table(['原因', '邮件主题 / 联系人', '当前分类', '状态', '创建时间'], data.items, item => [cellText(reviewReason(item.reasonCode), 'cell-title'), cellText(item.sourceMessage?.subject || item.contact?.displayName || item.entityType), classifyBadge(item.sourceMessage?.classification), statusBadge(item.status), cellText(formatDate(item.createdAt))], { click: item => openReview(item.id) }));
+      box.append(table(['原因', '邮件主题 / 联系人', '当前分类', '状态', '创建时间'], data.items, item => [append(el('div', 'review-reason-cell'), el('strong', '', reviewReason(item.reasonCode)), el('p', 'small-text', reviewGuidance(item.reasonCode).why)), cellText(item.sourceMessage?.subject || item.contact?.displayName || item.entityType), classifyBadge(item.sourceMessage?.classification), statusBadge(item.status), cellText(formatDate(item.createdAt))], { click: item => openReview(item.id) }));
       box.append(pagination(data.total, limit, offset, next => { state.offsets.reviews = next; loadPage('reviews'); })); content.append(box);
     },
-    async audit({ content, api, pageIntro }) {
+    async audit({ content, api, request, pageIntro }) {
       const [summary, uncertain, failures, pending] = await Promise.all([
         api('/mail/classifications/summary'), api('/mail/ai-audit/candidates?scope=uncertain&limit=20&offset=0'),
         api('/mail/agent-events?status=failed&limit=20&offset=0'), api('/mail/reviews?status=pending&limit=1&offset=0'),
       ]);
       content.replaceChildren(); pageIntro('分类与审计', '后台分类、退信与自动邮件均可查询，不会因为进入此页触发通知。');
       const metrics = el('div', 'grid metrics'); append(metrics, metric('邮件总量', summary.total ?? 0, `已分类 ${summary.classified ?? 0}`), metric('待判断', summary.unclassified ?? 0, '分类覆盖情况'), metric('需复核', summary.reviewRequired ?? 0, '需人工确认'), metric('Agent 失败事件', failures.total ?? failures.events?.length ?? 0, '只读事件记录')); content.append(metrics);
+      await renderRecoveryPanel(content, request);
       const categories = card('邮件分类统计', '覆盖商务邮件、自动回复、广告、退信和垃圾邮件。');
-      categories.append(table(['分类', '邮件数'], summary.categories || [], item => [classifyBadge(item.classification), cellText(item.count)]));
+      categories.append(table(['分类', '邮件数'], summary.categories || [], item => [classifyBadge(item.classification), cellText(item.count)])); content.append(categories);
       const grid = el('div', 'grid two'); const candidates = card('待审计邮件', 'AI 二次审计候选，不自动修改分类。');
       const candidateItems = uncertain.messages || uncertain.items || uncertain.candidates || [];
       candidates.append(table(['主题', '原因', '分类'], candidateItems, item => [cellText(item.subject || '(无主题)', 'cell-title'), cellText(item.classificationReason || item.reasonCode || item.reason || '需要确认'), classifyBadge(item.classification)], { click: item => item.id ? openEmail(item.id) : undefined }));
       const events = card('失败的 Agent 事件', '事件处理状态和错误码，不含邮件正文。');
       events.append(table(['事件类型', '状态', '重试', '最后错误', '更新时间'], failures.items || failures.events || [], item => [cellText(item.eventType || item.type), statusBadge(item.status), cellText(item.attempts ?? 0), cellText(item.lastErrorCode || item.lastError || '—'), cellText(formatDate(item.updatedAt || item.createdAt))]));
       append(grid, candidates, events); content.append(grid); if (pending.total) content.append(el('p', 'small-text', `另有 ${pending.total} 条人工复核待处理。`));
+      events.append(el('p', 'small-text', 'Agent 失败需先检查宿主连接与工具权限；此页不重放事件或通知。投递结果不明时自动重发受抑制，避免重复通知。'));
     },
     async 'delivery-failures'({ content, api, request, pageIntro }) {
       const limit = 30;
@@ -1119,12 +1126,106 @@
       ];
       const grid = el('div', 'grid equal');
       for (const [title, value] of cards) { const box = card(title); renderSettings(box, value); grid.append(box); }
-      content.append(grid, el('p', 'small-text', '修改服务器环境变量请在部署机的 .env 中进行，再按项目部署方式重启服务。Dashboard 不读取或显示 .env 内容。'));
+      content.append(grid, button('查看邮件处理与恢复', () => loadPage('audit'), 'button secondary'), el('p', 'small-text', '修改服务器环境变量请在部署机的 .env 中进行，再按项目部署方式重启服务。Dashboard 不读取或显示 .env 内容。'));
     },
   };
 
-  function reviewReason(code) {
-    return ({ FACT_REANALYSIS_REVIEW_REQUIRED: '重分析事项需要确认是否重复', CLASSIFICATION_UNCERTAIN: '邮件分类不确定', AI_CLASSIFICATION_DISAGREEMENT: 'AI 分类意见不一致', PROJECT_UNRESOLVED: '无法匹配项目', PROJECT_AMBIGUOUS: '项目匹配有歧义', PROJECT_ANALYSIS_UNCERTAIN: '项目归属待确认', PROJECT_ANALYSIS_MULTI_PROJECT: '多个项目候选待确认', PROJECT_ANALYSIS_NEW_OPPORTUNITY: '新合作机会待确认', TOPIC_UNRESOLVED: '无法匹配 Topic', CONTACT_PROVISIONAL: '联系人待确认', CONTACT_AMBIGUOUS: '联系人匹配有歧义' })[code] || code || '待复核';
+  const REVIEW_GUIDANCE = {
+    CLASSIFICATION_UNCERTAIN: ['邮件分类不确定', '现有规则和证据不足以可靠区分真人商务邮件与自动邮件。', '先读来源邮件和分类证据，再选择合适分类；不要仅根据回复头判断自动回复。'],
+    AI_CLASSIFICATION_DISAGREEMENT: ['AI 分类意见不一致', '模型建议与当前保存的邮件分类不同，建议尚未替换当前分类。', '对照当前分类、模型建议和原文证据，确认后再保存；忽略只处理本条复核。'],
+    PROJECT_UNRESOLVED: ['无法匹配项目', '目前没有足够证据将这封邮件归入一个已有项目。', '阅读来源和已有项目后再选择；联系人相同不代表属于同一项目。'],
+    PROJECT_AMBIGUOUS: ['项目匹配有歧义', '有多个可能项目，系统无法可靠确定唯一归属。', '对照本封邮件内容和各项目背景后人工选择，不要只按主题或年份判断。'],
+    PROJECT_ANALYSIS_UNCERTAIN: ['项目归属待确认', '项目分析的证据不足或上下文存在冲突，尚未自动确定归属。', '核对原文与候选项目；可以选择已有项目，或明确保留为未归属。'],
+    PROJECT_ANALYSIS_MULTI_PROJECT: ['多个项目候选待确认', '邮件可能涉及多个项目，系统没有替你选择唯一主项目。', '阅读候选依据后选择当前主项目；多项目事实仍需分别确认。'],
+    PROJECT_ANALYSIS_NEW_OPPORTUNITY: ['新合作机会待确认', '分析认为可能是新一轮合作，尚未把它当成既有项目，也未自动创建新项目。', '先确认是否为新合作；需要建档时通过手动 CRM/项目入口创建，再选择归属。'],
+    TOPIC_UNRESOLVED: ['无法匹配 Topic', '邮件已有项目，但项目内的议题还不能可靠确定。', '选择该项目下合适的 Topic，或确认需要后新建并分配。'],
+    FACT_REANALYSIS_REVIEW_REQUIRED: ['重分析事项需要确认是否重复', '新的分析提案与已有任务、需求或决策存在变化或匹配不明，系统没有按标题或位置自动覆盖。', '对照来源与已有事项，在对应业务记录中手动更正；重复提案可忽略，本页不会直接应用新事实。'],
+    CONTACT_AMBIGUOUS: ['联系人匹配有歧义', '现有联系人关系不足以确定唯一对象。', '核对已登记邮箱及现有联系人，不要自动合并冲突资料。'],
+    CONTACT_PROVISIONAL: ['联系人待确认', '这是历史联系人复核记录。', '当前联系人由人工维护；请按旧联系人审计流程处理，不批量确认或清空。'],
+  };
+  function reviewGuidance(code) {
+    const [title, why, next] = (Object.hasOwn(REVIEW_GUIDANCE, code) ? REVIEW_GUIDANCE[code] : null) || ['需要人工确认', '这条记录的复核类型尚无专门说明，不能据此推断业务事实。', '先核对来源与原始建议；不确定时保留待处理，并请维护者核查技术信息。'];
+    return { title, why, next };
+  }
+  function reviewReason(code) { return reviewGuidance(code).title; }
+  function technicalDetails(title, value) {
+    const details = el('details', 'technical-details');
+    append(details, el('summary', '', title), el('pre', 'json-block', typeof value === 'string' ? value : JSON.stringify(value, null, 2)));
+    return details;
+  }
+  function recoveryExplanation(item) {
+    const reasons = {
+      AI_NOT_CONFIGURED: '模型尚未配置。请先由维护者补齐配置，再重新排队。',
+      AI_TIMEOUT: '模型请求超时。确认服务可用后，可以重新判断。',
+      AI_NETWORK_ERROR: '模型连接失败。请先检查网络或端点配置。',
+      AI_RATE_LIMITED: '模型服务限制了请求频率。稍后再重试。',
+      AI_UPSTREAM_UNAVAILABLE: '模型服务暂不可用。确认恢复后再重试。',
+      AI_UPSTREAM_REJECTED: '模型服务拒绝了请求。请先核查凭据与模型配置。',
+      TRIAGE_LEASE_EXPIRED_MAX_ATTEMPTS: '处理曾中断，且已达到自动尝试上限。确认后台工作进程恢复后再重试。',
+      TRIAGE_MANUAL_CLASSIFICATION_OVERRIDE: '邮件分类由人工修改过，自动结果已暂缓。请先核对分类，重试不会撤销人工决定。',
+      TRIAGE_CLASSIFICATION_REQUIRES_REVIEW: '当前邮件分类仍需人工确认。请先处理分类复核。',
+    };
+    return (Object.hasOwn(reasons, item.lastErrorCode) ? reasons[item.lastErrorCode] : null) || (item.status === 'failed' ? '重要性判断未完成。请核查技术信息和服务状态后再重试。' : item.status === 'review' ? '模型结果或证据还不足以自动决定是否需要跟进；可先阅读来源并人工复核。' : item.status === 'pending' ? '已排队，等待后台工作进程处理。' : '本状态不提供手动重试。');
+  }
+  async function renderRecoveryPanel(container, request) {
+    const panel = card('邮件处理与恢复', '仅逐条重新排队失败或待复核的重要性判断；不清空历史、不强制重放通知。');
+    panel.classList.add('recovery-panel');
+    const toolbar = el('div', 'toolbar');
+    const selection = optionSelect([['failed', '判断失败'], ['review', '判断待复核'], ['pending', '等待处理'], ['processing', '正在处理']], state.filters.recoveryStatus);
+    selection.setAttribute('aria-label', '重要性判断状态');
+    const feedback = el('p', 'small-text recovery-feedback'); feedback.setAttribute('role', 'status');
+    const body = el('div', 'recovery-body'); let sequence = 0;
+    append(toolbar, selection, button('刷新处理记录', () => read(), 'button secondary small'), button('打开人工复核', () => loadPage('reviews'), 'button ghost small'), button('查看项目分析', () => loadPage('projects'), 'button ghost small'));
+    append(panel, toolbar, feedback, body); container.append(panel);
+    selection.addEventListener('change', () => { state.filters.recoveryStatus = selection.value; state.offsets.recovery = 0; read(); });
+    async function read() {
+      const current = ++sequence, limit = 20, offset = state.offsets.recovery || 0;
+      body.replaceChildren(el('p', 'loading', '正在读取处理记录…'));
+      try {
+        const data = await request.api('/mail/importance-triage?' + query({ status: selection.value, limit, offset }));
+        if (!request.active || current !== sequence) return;
+        body.replaceChildren();
+        const items = data.triages || [];
+        if (!items.length) body.append(el('p', 'empty', '当前筛选下没有处理记录。'));
+        for (const item of items) {
+          const row = el('div', 'recovery-record');
+          append(row, el('h3', '', item.sourceMessage?.subject || '来源邮件未提供主题'), el('p', 'small-text', ( { failed: '判断失败', review: '判断待复核', pending: '等待处理', processing: '正在处理' }[item.status] || '其他状态') + ' · 已尝试 ' + (item.attempts ?? 0) + ' 次 · ' + formatDate(item.updatedAt || item.createdAt)), el('p', '', recoveryExplanation(item)));
+          if (typeof item.reason === 'string' && item.reason.trim()) row.append(el('p', 'small-text', '处理记录：' + item.reason));
+          row.append(technicalDetails('查看处理技术信息', { status: item.status, lastErrorCode: item.lastErrorCode || null, attempts: item.attempts, maxAttempts: item.maxAttempts }));
+          const actions = el('div', 'action-row');
+          actions.append(sourceEmailButton(item.sourceMessageId, !item.sourceMessageId, '阅读来源邮件'));
+          if (['failed', 'review'].includes(item.status) && item.id) {
+            const retry = button('重新判断此邮件', () => {
+              if (!request.active || current !== sequence || triageRetriesInFlight.has(item.id)) return;
+              requestInlineConfirmation(row, '重新排队将再次调用模型；合格的新来信可能按现有规则生成 Agent 事件并通知 WhatsApp。历史导入仍保持静默，人工修改不会被撤销。确认只重试这封邮件？', '确认重新排队', async () => {
+                if (!request.active || current !== sequence || triageRetriesInFlight.has(item.id)) return;
+                const snapshot = JSON.stringify([item.status, item.updatedAt, item.attempts]);
+                let operation = triageRetryOperations.get(item.id);
+                if (!operation || operation.snapshot !== snapshot) { operation = { snapshot, id: crypto.randomUUID() }; triageRetryOperations.set(item.id, operation); }
+                triageRetriesInFlight.add(item.id); retry.disabled = true; retry.textContent = '正在排队…';
+                try {
+                  await api('/mail/importance-triage/' + encodeURIComponent(item.id) + '/retry', { method: 'POST', body: JSON.stringify({ operationId: operation.id }) });
+                  triageRetryOperations.delete(item.id);
+                  if (request.active) { feedback.className = 'small-text recovery-feedback'; feedback.textContent = '已提交重新排队请求。这不代表判断完成或通知已送达，请刷新查看状态。'; await read(); }
+                } catch (error) {
+                  if (request.active) { feedback.className = 'error recovery-feedback'; feedback.textContent = error.message + ' 尚未确认入队结果；重试同一记录会复用操作编号。'; }
+                  throw error;
+                } finally {
+                  triageRetriesInFlight.delete(item.id); retry.disabled = false; retry.textContent = '重新判断此邮件';
+                }
+              }, 'triage-retry-confirmation', '确认重新判断邮件');
+            }, 'button secondary small');
+            retry.disabled = triageRetriesInFlight.has(item.id); actions.append(retry);
+          }
+          row.append(actions); body.append(row);
+        }
+        body.append(pagination(data.total ?? 0, limit, offset, next => { state.offsets.recovery = next; read(); }));
+      } catch (error) {
+        if (!request.active || current !== sequence || error.name === 'AbortError') return;
+        body.replaceChildren(el('p', 'error', '处理记录读取失败：' + error.message), button('重试读取处理记录', read, 'button secondary small'));
+      }
+    }
+    await read();
   }
   function settingLabel(key) { return SETTING_LABELS[key] || key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replaceAll('_', ' '); }
   function settingValue(key, value) {
@@ -1689,14 +1790,16 @@
     try {
       const review = await request.api(`/mail/reviews/${encodeURIComponent(id)}`); const message = review.sourceMessage; const proposal = review.proposedChangeJson || {};
       const analysisReview = ['PROJECT_ANALYSIS_UNCERTAIN', 'PROJECT_ANALYSIS_MULTI_PROJECT', 'PROJECT_ANALYSIS_NEW_OPPORTUNITY'].includes(review.reasonCode);
-      let assignmentMessage = message; let sourceUnavailable = Boolean(message?.sourceDeletedAt || message?.isSourceDeleted);
+      let assignmentMessage = message; let sourceUnavailable = Boolean(review.isSourceDeleted || review.sourceDeletedAt || message?.sourceDeletedAt || message?.isSourceDeleted);
       if (analysisReview && message?.id && !sourceUnavailable) {
         try { assignmentMessage = await request.api(`/mail/messages/by-id/${encodeURIComponent(message.id)}`); }
         catch (error) { if (/不存在|not found|404/i.test(error.message)) sourceUnavailable = true; else throw error; }
       }
       dialogContent.replaceChildren();
       append(dialogContent, el('p', 'eyebrow', reviewReason(review.reasonCode)), el('h2', '', message?.subject || review.contact?.displayName || review.entityType), detailMeta([['状态', LABELS[review.status] || review.status], ['置信度', review.confidence ?? '—'], ['当前分类', CLASSIFICATIONS[message?.classification] || message?.classification || '—'], ['收到时间', formatDate(message?.receivedAt || review.createdAt)]]));
-      if (review.reasonCode === 'FACT_REANALYSIS_REVIEW_REQUIRED') dialogContent.append(el('p', 'small-text', '请对照来源邮件与已有事项；确认后可在任务或业务记录中手动更正，重复提案可忽略。'));
+      const guidance = reviewGuidance(review.reasonCode);
+      append(dialogContent, el('h3', '', review.status === 'pending' ? '为什么需要确认' : '当时的复核原因'), el('p', 'review-explanation', guidance.why));
+      if (review.status === 'pending') append(dialogContent, el('h3', '', '建议下一步'), el('p', 'review-next-step', sourceUnavailable || review.isSourceDeleted ? '来源邮件已删除或不可读取；不要据此更改来源归属。可保留记录，或确认不再需要后忽略。' : guidance.next));
       if (analysisReview) {
         const candidates = proposal.candidates || proposal.candidateProjects || review.candidateProjects || [];
         if (proposal.reason) dialogContent.append(el('p', 'small-text', proposal.reason));
@@ -1704,9 +1807,15 @@
         appendEvidence(dialogContent, proposal.evidence, { sourceDeleted: sourceUnavailable });
         if (sourceUnavailable) dialogContent.append(el('p', 'notice-inline', '来源邮件已删除或不可读取；不能打开或更改它的项目归属。'));
       } else {
-        const proposalBlock = el('pre', 'json-block', JSON.stringify(proposal, null, 2)); dialogContent.append(el('h3', '', '建议与证据'), proposalBlock);
+        dialogContent.append(el('h3', '', '建议与证据'));
+        if (proposal.currentClassification || proposal.suggestedClassification) dialogContent.append(detailMeta([['保存的分类', CLASSIFICATIONS[proposal.currentClassification] || '未提供'], ['模型建议', CLASSIFICATIONS[proposal.suggestedClassification] || '未提供']]));
+        if (typeof proposal.reason === 'string') dialogContent.append(el('p', 'small-text', proposal.reason));
+        if (typeof proposal.summary === 'string') dialogContent.append(el('p', '', proposal.summary));
+        if (Array.isArray(proposal.evidence)) for (const evidence of proposal.evidence) { if (typeof evidence === 'string') dialogContent.append(el('p', 'review-evidence', evidence)); }
+        appendEvidence(dialogContent, proposal.evidence, { sourceDeleted: sourceUnavailable || review.isSourceDeleted });
       }
-      if (message?.id) dialogContent.append(sourceEmailButton(message.id, sourceUnavailable, '查看源邮件'));
+      dialogContent.append(technicalDetails('查看原始建议与技术信息', analysisReview ? { reasonCode: review.reasonCode } : { reasonCode: review.reasonCode, proposal }));
+      if (message?.id) dialogContent.append(sourceEmailButton(message.id, sourceUnavailable || review.isSourceDeleted, '查看源邮件'));
       if (review.status !== 'pending') { dialogContent.append(el('p', 'small-text', `处理人：${review.resolvedBy || '—'} · ${formatDate(review.resolvedAt)}`)); return; }
       const actions = el('div', 'action-row'); const operationIds = new Map(); let resolving = false;
       const operationFor = (action, extra) => { const key = JSON.stringify([action, extra]); if (!operationIds.has(key)) operationIds.set(key, crypto.randomUUID()); return operationIds.get(key); };

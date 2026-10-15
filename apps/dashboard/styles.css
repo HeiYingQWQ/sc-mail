@@ -413,3 +413,19 @@
     border-top: 1px solid var(--line);
   }
 }
+
+/* Recovery and review guidance reuse the existing Console typography and controls. */
+.recovery-record { padding: 20px 0; border-top: 1px solid var(--line); }
+.recovery-record h3, .review-reason-cell { overflow-wrap: anywhere; }
+.recovery-record > p, .review-explanation, .review-next-step { max-width: 70ch; line-height: 1.65; overflow-wrap: anywhere; }
+.recovery-record .action-row { margin-top: 12px; }
+.technical-details { margin: 12px 0; max-width: 100%; }
+.technical-details summary { cursor: pointer; font-size: 14px; color: #526477; }
+.technical-details summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
+.technical-details .json-block { max-width: 100%; overflow: auto; }
+.review-evidence { padding: 8px 0; line-height: 1.65; overflow-wrap: anywhere; }
+@media (max-width: 680px) {
+  .recovery-panel .toolbar { align-items: stretch; }
+  .recovery-panel .toolbar select { width: 100%; }
+  .recovery-record .action-row { flex-wrap: wrap; }
+}
