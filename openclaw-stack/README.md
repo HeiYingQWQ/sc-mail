@@ -16,6 +16,7 @@
 | compose.yml、compose.server.yml | 独立本机栈和 Linux 私网覆盖 |
 | setup.mjs | 仅首次生成本地 .env，已有文件不覆盖 |
 | configure-mcp.mjs | 注册 MCP、专用 hook、主助手与受限 relay 的工具范围 |
+| enable-crm-tools.mjs、enable-delivery-tools.mjs | 已注册 MCP 的受限工具补齐，仅修改三处允许列表，保留 deny/模型/relay |
 | enable-events.mjs | 显式启用事件地址及匹配 hook token；要求单一允许 WhatsApp 收件人 |
 | enable-whatsapp-notifications.mjs | 同步 sender URL/token，不改变收件 allowlist、不发测试消息 |
 | agent-templates | 通用助手模板与非覆盖式安装器；用户私有 agent-files 不进入仓库 |

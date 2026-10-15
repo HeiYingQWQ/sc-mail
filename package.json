@@ -51,7 +51,9 @@
     "verify:backup": "node scripts/verify-backup.mjs",
     "verify:backup-postgres": "node scripts/verify-backup-postgres.mjs",
     "verify:integration-local": "node scripts/acceptance.cjs",
-    "verify:whatsapp": "node scripts/verify-whatsapp.cjs"
+    "verify:whatsapp": "node scripts/verify-whatsapp.cjs",
+    "verify:openclaw-delivery": "node scripts/verify-openclaw-delivery.mjs",
+    "verify:logging": "node scripts/verify-logging.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

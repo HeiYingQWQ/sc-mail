@@ -1,6 +1,6 @@
 # V0 开发日志
 
-当前进度 **V0.9.6**。本文件集中保存 V0.x 开发、历史验证和部署结果；当前能力/待办见 [README](../README.md)。
+当前进度 **V0.9.7**。本文件集中保存 V0.x 开发、历史验证和部署结果；当前能力/待办见 [README](../README.md)。
 
 V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代表当时正式发布；早期 Git 没有逐阶段提交，累计验收不证明每阶段的独立发布日期。保留有证据的日期/区间，不补齐中间编号。
 
@@ -104,3 +104,10 @@ V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代�
 - 备份/进程故障 14 项、WhatsApp 模拟传输 8 项通过；独立审查发现的 Alpine timeout 与大归档 TOC 提前关闭已修复，Alpine 上 >5 MB 文件在源合成库删除后恢复原文/关系及通知状态。
 - 未部署；真实邮箱/手机、生产备份与离机完整应用恢复、连续运行验收仍待完成；最新 CI 与审查状态以本次 PR 为准。
 - 证据：[PR #4](https://github.com/HeiYingQWQ/sc-mail/pull/4)、[CI 配置](../.github/workflows/ci.yml)、[备份文件验收](../scripts/verify-backup-postgres.mjs)、[运维步骤](OPERATIONS.md#p0-隔离恢复及完整回归)。
+
+## V0.9.7 · 投递报告工具接入与启动日志（2026-10-15）
+- 为现有 OpenClaw 安装补齐 4 项投递报告/系统发件地址工具的受限启用入口，复用 CRM 校验、备份和原子写入；只追加三处允许列表，保留 deny、模型、hook 与通知 relay。
+- 日志模块显式使用 NestJS 11 命名通配符及根路径，避免旧 wildcard 警告、根路径漏记或尾斜杠重复日志，保留原脱敏规则。
+- 验证：构建/类型检查，工具契约 83 次 fake 请求，受限配置/MCP→本机 HTTP 17 项，真实 Nest/Express 7 次回环请求通过；两项新回归纳入 CI。
+- 未更改 Schema/迁移、现有宿主配置或生产服务；真实宿主工具授权/手机调用、真实邮箱与通知、部署及灾难恢复验收仍待完成。
+- 证据：[PR #5](https://github.com/HeiYingQWQ/sc-mail/pull/5)、[受限入口](../openclaw-stack/enable-delivery-tools.mjs)、[投递工具验收](../scripts/verify-openclaw-delivery.mjs)、[日志验收](../scripts/verify-logging.cjs)、[接入步骤](AGENT_INTEGRATION.md#现有安装补齐投递报告工具)。

@@ -48,7 +48,21 @@ $oc = @('compose', '--env-file', 'openclaw-stack/.env', '--project-name', 'ai-ma
 & $dc @oc run --rm openclaw-cli skills info sc-mail --agent ai-mail --json
 ```
 
-MCP 检查应返回 `ai-mail: ok`，Skill 检查应显示 `sc-mail` 的 `eligible` 和 `modelVisible` 为 `true`。Compose 将 `/opt/ai-mail-mcp.mjs`、`/opt/ai-mail.mjs`、`/opt/tool-contracts.mjs` 和受限 CRM 工具 helper 只读挂载；`configure-mcp.mjs` 是初始配置工具，不要为了更新 CRM 工具而重复运行它，因为它会调整更广的宿主设置。对已经正确注册的 Ai Mail MCP，先审查配置，再使用本教程中已初始化的 `$oc` Compose 参数运行 `& $dc @oc exec -T openclaw-gateway node /opt/enable-crm-tools.mjs`。该 helper 只追加共享 registry 中 CRM/项目/分析/邮件归属工具到现有的三处允许列表，保留模型、文件权限、cron、hook、relay 与已有 deny，并在写配置前备份；它不会注册 MCP 或授予通用 shell/exec。运行后重建 Gateway 使 MCP 过滤生效。当前是否已启用以实时 `mcp probe` 和 OpenClaw 配置为准，不从脚本存在推断接入完成。CLI 与 Gateway 共用 `openclaw_state`；Skill 由 Compose 以只读目录挂载到 OpenClaw workspace。OpenClaw 容器通过 `host.docker.internal:3000` 访问 SC Mail；宿主机的 Gateway 端口只映射到 `127.0.0.1:18789`。
+MCP 检查应返回 `ai-mail: ok`，Skill 检查应显示 `sc-mail` 的 `eligible` 和 `modelVisible` 为 `true`。Compose 将 `/opt/ai-mail-mcp.mjs`、`/opt/ai-mail.mjs`、`/opt/tool-contracts.mjs` 及受限 CRM/投递报告工具 helper 只读挂载；`configure-mcp.mjs` 是初始配置工具，不要为了补齐工具而重复运行它，因为它会调整更广的宿主设置。对已经正确注册的 Ai Mail MCP，先审查配置，再使用本教程中已初始化的 `$oc` Compose 参数运行 `& $dc @oc exec -T openclaw-gateway node /opt/enable-crm-tools.mjs`。该 helper 只追加共享 registry 中 CRM/项目/分析/邮件归属工具到现有的三处允许列表，保留模型、文件权限、cron、hook、relay 与已有 deny，并在写配置前备份；它不会注册 MCP 或授予通用 shell/exec。运行后重建 Gateway 使 MCP 过滤生效。当前是否已启用以实时 `mcp probe` 和 OpenClaw 配置为准，不从脚本存在推断接入完成。CLI 与 Gateway 共用 `openclaw_state`；Skill 由 Compose 以只读目录挂载到 OpenClaw workspace。OpenClaw 容器通过 `host.docker.internal:3000` 访问 SC Mail；宿主机的 Gateway 端口只映射到 `127.0.0.1:18789`。
+
+### 现有安装补齐投递报告工具
+
+新增的 /opt/enable-delivery-tools.mjs 仅补齐 list_delivery_failures、list_system_mail_senders、add_system_mail_sender、delete_system_mail_sender。它复用 CRM helper 的校验和原子写入，只追加全局 tools.allow、ai-mail Agent tools.allow、Ai Mail MCP toolFilter.include 三处列表；写前备份、重复运行不重复写，遇到 deny/exclude 冲突或不完整注册直接拒绝，不改变模型、hook、记忆、文件权限或通知 relay，也不调用业务 API。
+
+在已授权的维护窗口使用当前仓库的 Compose；先备份并核实宿主配置，运行受限 helper，再重建 Gateway 使过滤生效：
+
+```powershell
+& $dc @oc run --rm --entrypoint node openclaw-cli /opt/enable-delivery-tools.mjs
+& $dc @oc up --detach --force-recreate openclaw-gateway
+& $dc @oc run --rm openclaw-cli mcp doctor ai-mail --probe
+```
+
+核实上述四项在实际工具列表中可见，另用合成受控目标验收查询和管理操作；脚本存在、输出 enabled=true 或隔离测试通过均不代表当前宿主已启用或手机已验收。系统发件地址会影响后续分类/静默，增删必须有用户明确指令和独立稳定 operationId；报告、退信或后台事件不能授权修改。relay 仍只有 session_status。不要把这些脚本用于绕过已存在的 deny，也不要重跑 configure-mcp 来扩大权限。本轮开发不自动执行以上运维命令。
 
 可选地把通用个人助手文件补入 `ai-mail` Agent workspace。先用 `agents list --json` 确认该 Agent 的容器内 workspace 路径；模板默认来自仓库 `openclaw-stack/agent-templates`，不要从被忽略的本机私有 `agent-files/` 复制。安装器只创建缺少的文件，已有文件（尤其 `MEMORY.md` 与 `memory/` 记录）保持原样；它不改 OpenClaw 运行配置，也不启动 Agent：
 
