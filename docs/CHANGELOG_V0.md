@@ -110,4 +110,4 @@ V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代�
 - 日志模块显式使用 NestJS 11 命名通配符及根路径，避免旧 wildcard 警告、根路径漏记或尾斜杠重复日志，保留原脱敏规则。
 - 验证：构建/类型检查，工具契约 83 次 fake 请求，受限配置/MCP→本机 HTTP 17 项，真实 Nest/Express 7 次回环请求通过；两项新回归纳入 CI。
 - 未更改 Schema/迁移、现有宿主配置或生产服务；真实宿主工具授权/手机调用、真实邮箱与通知、部署及灾难恢复验收仍待完成。
-- 证据：[受限入口](../openclaw-stack/enable-delivery-tools.mjs)、[投递工具验收](../scripts/verify-openclaw-delivery.mjs)、[日志验收](../scripts/verify-logging.cjs)、[接入步骤](AGENT_INTEGRATION.md#现有安装补齐投递报告工具)。
+- 证据：[PR #5](https://github.com/HeiYingQWQ/sc-mail/pull/5)、[受限入口](../openclaw-stack/enable-delivery-tools.mjs)、[投递工具验收](../scripts/verify-openclaw-delivery.mjs)、[日志验收](../scripts/verify-logging.cjs)、[接入步骤](AGENT_INTEGRATION.md#现有安装补齐投递报告工具)。
