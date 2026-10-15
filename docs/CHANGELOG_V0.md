@@ -111,3 +111,11 @@ V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代�
 - 验证：构建/类型检查，工具契约 83 次 fake 请求，受限配置/MCP→本机 HTTP 17 项，真实 Nest/Express 7 次回环请求通过；两项新回归纳入 CI。
 - 未更改 Schema/迁移、现有宿主配置或生产服务；真实宿主工具授权/手机调用、真实邮箱与通知、部署及灾难恢复验收仍待完成。
 - 证据：[PR #5](https://github.com/HeiYingQWQ/sc-mail/pull/5)、[受限入口](../openclaw-stack/enable-delivery-tools.mjs)、[投递工具验收](../scripts/verify-openclaw-delivery.mjs)、[日志验收](../scripts/verify-logging.cjs)、[接入步骤](AGENT_INTEGRATION.md#现有安装补齐投递报告工具)。
+
+## V0.9.8 · 故障恢复入口与复核说明（2026-10-15）
+- 分类与审计增加重要性判断状态筛选、分页、原因与逐条重试，系统状态提供入口；内联确认提示模型及可能的 WhatsApp 后续，复用既有审计接口与稳定操作 ID，不重放通知。
+- 人工复核展示原因、下一步与分类/证据摘要，原始建议折叠；未知原因保守说明、来源删除禁止跳转，保留原有确认及人工保护。
+- 验证：构建/类型检查、Dashboard 63/63、工具契约 83 次、完整隔离 PostgreSQL 集成 53/53；修正模拟通知到期时间竞态，未改业务投递逻辑。
+- 合成浏览器桌面/390px 检查筛选、来源、取消与单条重新排队；实际生成 1 条重试审计、0 条通知，局部页面无横向溢出；新增可选恢复 fixture，回归沿用 CI。
+- 无 API/Schema/迁移变化，未部署、未接生产邮箱或真实通知；Agent/通知恢复、全页面移动端及真实故障演练仍待独立验收。
+- 证据：[Dashboard 回归](../scripts/verify-dashboard.cjs)、[合成 fixture](../scripts/ui-crm-acceptance.cjs)、[恢复操作说明](OPERATIONS.md#dashboard-恢复与人工复核)。

@@ -1166,7 +1166,7 @@ async function main() {
       assert.equal(deliveredAgain.status, 'delivered');
       assert.equal(deliveredAgain.attempts, firstAttempts);
       assert.equal(deliveredAgain.providerDeliveryId, firstProviderDeliveryId);
-      await db.notificationDelivery.create({ data: { requestKey: 'rate-limit', requestHash: 'fixture', channel: 'whatsapp', recipientRef: '+15555550123', content: 'Synthetic retry' } });
+      await db.notificationDelivery.create({ data: { requestKey: 'rate-limit', requestHash: 'fixture', channel: 'whatsapp', recipientRef: '+15555550123', content: 'Synthetic retry', nextAttemptAt: new Date(0) } });
       sendMode = '503'; await integrations.deliverNotification(); assert.equal((await db.notificationDelivery.findUniqueOrThrow({ where: { requestKey: 'rate-limit' } })).status, 'pending');
       await db.notificationDelivery.update({ where: { requestKey: 'rate-limit' }, data: { nextAttemptAt: new Date(0) } });
       sendMode = 'network'; await integrations.deliverNotification(); assert.equal((await db.notificationDelivery.findUniqueOrThrow({ where: { requestKey: 'rate-limit' } })).status, 'unknown');
@@ -1185,7 +1185,8 @@ async function main() {
       return Response.json({ runId: 'synthetic-openclaw-run', completion: { status: 'ok', delivered: true } });
     };
     try {
-      await db.notificationDelivery.create({ data: { requestKey: 'whatsapp-valid-e164', requestHash: 'fixture', channel: 'whatsapp', recipientRef: recipient, content: 'Synthetic WhatsApp notification' } });
+      // These cases validate transport/recipient handling, independently of sub-ms DB defaults or host clock skew.
+      await db.notificationDelivery.create({ data: { requestKey: 'whatsapp-valid-e164', requestHash: 'fixture', channel: 'whatsapp', recipientRef: recipient, content: 'Synthetic WhatsApp notification', nextAttemptAt: new Date(0) } });
       await integrations.deliverNotification();
       const delivered = await db.notificationDelivery.findUniqueOrThrow({ where: { requestKey: 'whatsapp-valid-e164' } });
       assert.equal(delivered.status, 'delivered'); assert.equal(delivered.providerDeliveryId, 'openclaw:synthetic-openclaw-run');
@@ -1193,7 +1194,7 @@ async function main() {
       assert.match(payload.message, /Synthetic WhatsApp notification/);
 
       settings.NOTIFICATION_ALLOWED_RECIPIENTS = `${recipient},not-a-phone`;
-      await db.notificationDelivery.create({ data: { requestKey: 'whatsapp-invalid-e164', requestHash: 'fixture', channel: 'whatsapp', recipientRef: 'not-a-phone', content: 'Synthetic invalid target' } });
+      await db.notificationDelivery.create({ data: { requestKey: 'whatsapp-invalid-e164', requestHash: 'fixture', channel: 'whatsapp', recipientRef: 'not-a-phone', content: 'Synthetic invalid target', nextAttemptAt: new Date(0) } });
       await integrations.deliverNotification();
       const invalid = await db.notificationDelivery.findUniqueOrThrow({ where: { requestKey: 'whatsapp-invalid-e164' } });
       assert.equal(invalid.status, 'failed'); assert.equal(invalid.lastError, 'WHATSAPP_RECIPIENT_INVALID');

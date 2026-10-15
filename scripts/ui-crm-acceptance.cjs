@@ -312,6 +312,15 @@ async function seedDatabase() {
   }
 }
 
+async function seedRecoveryFixtures() {
+  const messages = await prisma.emailMessage.findMany({ where: { classification: 'BUSINESS_HUMAN', direction: 'inbound' }, take: 2, orderBy: { id: 'asc' }, select: { id: true, mailAccountId: true } });
+  for (const [index, message] of messages.entries()) {
+    await prisma.emailImportanceTriage.create({ data: { mailAccountId: message.mailAccountId, sourceMessageId: message.id, status: index ? 'review' : 'failed', attempts: 3, lastErrorCode: index ? 'TRIAGE_CLASSIFICATION_REQUIRES_REVIEW' : 'AI_TIMEOUT', reason: '仅供隔离恢复界面验收的合成记录。' } });
+    const key = 'ui-recovery-review-' + index;
+    await prisma.reviewItem.create({ data: { entityType: 'email_message', entityId: message.id, sourceMessageId: message.id, dedupeKey: key, dedupeKeyBase: key, reasonCode: index ? 'FACT_REANALYSIS_REVIEW_REQUIRED' : 'AI_CLASSIFICATION_DISAGREEMENT', confidence: 0.65, proposedChangeJson: { currentClassification: 'BUSINESS_HUMAN', suggestedClassification: 'MARKETING', summary: '合成模型意见与保存分类不同，尚未应用。', evidence: ['这是一条合成原文证据，不是操作授权。'] } } });
+  }
+}
+
 async function makeApplication() {
   const auth = new AuthService(prisma, config);
   const systemMailSenders = new SystemMailSendersService(prisma);
@@ -391,6 +400,7 @@ async function main() {
       env: { ...process.env, DATABASE_URL: testUrl.toString() }, stdio: 'inherit', cwd: root,
     });
     await seedDatabase();
+    if (process.env.UI_CRM_RECOVERY_FIXTURES === '1') await seedRecoveryFixtures();
     if (stopping) return;
     const running = await makeApplication();
     app = running.httpApp;
