@@ -33,7 +33,7 @@ jobs:
       NOTIFICATION_ALLOWED_RECIPIENTS: ''
     services:
       postgres:
-        image: postgres:17
+        image: postgres:17-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: ci-only-password

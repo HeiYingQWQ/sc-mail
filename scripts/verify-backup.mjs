@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { backup } from './backup.mjs';
 import { verifyBackup } from './verify-backup-restore.mjs';
-import { positiveInteger, postgresRunner } from './backup-runtime.mjs';
+import { positiveInteger, postgresRunner, runProcess, operation } from './backup-runtime.mjs';
 
 const dir = await mkdtemp(join(tmpdir(), 'sc-mail-backup-unit-'));
 process.env.BACKUP_RESTORE_ALLOW_LOCAL_DB_CREATE = '1';
@@ -66,7 +66,7 @@ try {
   });
   await test('restore deadline retains independent cleanup budget', async () => {
     let dropped = false;
-    await assert.rejects(verifyBackup(join(dir, 'saved.dump'), { timeoutMs: 60, progressMs: 20, run: async (tool, args, { input, op }) => {
+    await assert.rejects(verifyBackup(join(dir, 'saved.dump'), { timeoutMs: 500, progressMs: 20, run: async (tool, args, { input, op }) => {
       if (input) for await (const _ of input) { /* consume */ }
       op.signal.throwIfAborted();
       if (tool === 'pg_restore' && args.includes('--dbname')) await new Promise((_, reject) => op.signal.addEventListener('abort', () => reject(new Error('restore timeout')), { once: true }));
@@ -80,6 +80,30 @@ try {
       if (tool === 'psql') return '{"migrations":27}';
       if (tool === 'dropdb') throw new Error('cleanup unavailable');
     } }), /Cleanup failed; remove only disposable database aimail_restore_check_/);
+  });
+  const largeInput = () => Readable.from((function* () { for (let i = 0; i < 512; i++) yield Buffer.alloc(65536, 65); })());
+  async function processCase(code, extra = {}, timeoutMs = 5000) {
+    const op = operation('process fixture', { timeoutMs, progressMs: 1000 });
+    try { return await runProcess(process.execPath, ['-e', code], { op, ...extra }); }
+    finally { op.close(); }
+  }
+  await test('TOC-style early successful exit accepts large stdin only when opted in', async () => {
+    await processCase("process.stdin.once('data', () => process.exit(0))", { input: largeInput(), allowEarlyInputClose: true });
+  });
+  await test('ordinary commands reject an early input close', async () => {
+    await assert.rejects(processCase("process.stdin.once('data', () => process.exit(0))", { input: largeInput() }));
+  });
+  await test('TOC-style early close never hides a nonzero process exit', async () => {
+    await assert.rejects(processCase("process.stdin.once('data', () => process.exit(2))", { input: largeInput(), allowEarlyInputClose: true }));
+  });
+  await test('actual child process timeout terminates and settles streams', async () => {
+    await assert.rejects(processCase('setInterval(() => {}, 1000)', {}, 250), /timed out/);
+  });
+  await test('destination failure terminates child and settles streams', async () => {
+    const output = new Writable({ write(_chunk, _encoding, done) { done(new Error('synthetic disk failure')); } });
+    const started = Date.now();
+    await assert.rejects(processCase("setInterval(() => process.stdout.write('x'), 10)", { output }));
+    assert.ok(Date.now() - started < 4000, 'failed output must not wait for the operation deadline');
   });
   await test('invalid timeout and remote native target refused', async () => {
     assert.throws(() => positiveInteger('0', 1)); assert.throws(() => positiveInteger('abc', 1));

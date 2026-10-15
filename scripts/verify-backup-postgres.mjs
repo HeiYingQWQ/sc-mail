@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, copyFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { PrismaClient } from '@prisma/client';
 import { backup } from './backup.mjs';
@@ -18,7 +18,7 @@ const sourceUrl = new URL(adminUrl); sourceUrl.pathname = `/${database}`;
 const admin = new PrismaClient({ datasourceUrl: adminUrl.toString() });
 const db = new PrismaClient({ datasourceUrl: sourceUrl.toString() });
 const dir = await mkdtemp(join(tmpdir(), 'sc-mail-backup-pg-'));
-const raw = Buffer.from('From: customer@test.invalid\r\nSubject: Synthetic recovery\r\n\r\nEvidence preserved.');
+const raw = Buffer.from('From: customer@test.invalid\r\nSubject: Synthetic recovery\r\nContent-Transfer-Encoding: base64\r\n\r\n' + randomBytes(4 * 1024 * 1024).toString('base64'));
 let created = false;
 try {
   await admin.$executeRawUnsafe(`CREATE DATABASE "${database}"`); created = true;

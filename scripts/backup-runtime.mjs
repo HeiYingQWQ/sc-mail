@@ -52,24 +52,40 @@ export function postgresRunner() {
       command = process.env.DOCKER_BIN || (process.platform === 'win32' ? resolve(process.env.LOCALAPPDATA, 'Programs/DockerDesktop/resources/bin/docker.exe') : 'docker');
       const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
       // Bound the server-side exec too: killing the Docker client alone need not stop it.
-      parameters = [...(container ? ['exec', '-i', process.env.BACKUP_PG_CONTAINER] : ['compose', 'exec', '-T', 'postgres']), 'sh', '-lc', `export PGUSER="$POSTGRES_USER" PGDATABASE=${database ? quote(database) : '"$POSTGRES_DB"'} PGCONNECT_TIMEOUT=10; exec timeout --signal=KILL ${op.remainingSeconds()}s ${[tool, ...args].map(quote).join(' ')}`];
+      parameters = [...(container ? ['exec', '-i', process.env.BACKUP_PG_CONTAINER] : ['compose', 'exec', '-T', 'postgres']), 'sh', '-lc', `export PGUSER="$POSTGRES_USER" PGDATABASE=${database ? quote(database) : '"$POSTGRES_DB"'} PGCONNECT_TIMEOUT=10; exec timeout -s KILL ${op.remainingSeconds()}s ${[tool, ...args].map(quote).join(' ')}`];
     }
-    const child = spawn(command, parameters, { env: childEnv, windowsHide: true, stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe'], signal: op.signal, killSignal: 'SIGKILL' });
-    // PostgreSQL errors can contain row contents; report phase/exit code only.
-    child.stderr.resume();
-    let result = '', overflow = false;
-    if (!output) child.stdout.on('data', chunk => { if (result.length < 1024 * 1024) result += chunk; else overflow = true; });
-    const ended = new Promise((resolveExit, reject) => {
-      child.once('error', () => reject(new Error(op.signal.aborted ? 'Operation timed out or cancelled' : `${tool} could not start`)));
-      child.once('close', code => code === 0 && !overflow ? resolveExit() : reject(new Error(`${tool} failed (exit ${code ?? 'unknown'})`)));
-    });
-    try {
-      await Promise.all([ended, ...(input ? [pipeline(input, op.meter(), child.stdin, { signal: op.signal })] : []), ...(output ? [pipeline(child.stdout, output, { signal: op.signal })] : [])]);
-      return result.trim();
-    } catch (error) {
-      child.kill('SIGKILL');
-      await ended.catch(() => {});
-      throw error;
-    }
+    return runProcess(command, parameters, { env: childEnv, input, output, op,
+      allowEarlyInputClose: tool === 'pg_restore' && args.length === 1 && args[0] === '--list' });
   };
+}
+
+// pg_restore --list can exit successfully after its TOC without consuming data blocks.
+// Only that command may tolerate an early stdin close, and only after confirmed exit 0.
+export async function runProcess(command, parameters, { env = process.env, input, output, op, allowEarlyInputClose = false }) {
+  const transport = new AbortController();
+  const signal = AbortSignal.any([op.signal, transport.signal]);
+  signal.throwIfAborted();
+  const child = spawn(command, parameters, { env, windowsHide: true, stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe'], signal, killSignal: 'SIGKILL' });
+  child.stderr.resume();
+  let result = '', overflow = false, processError;
+  if (!output) child.stdout.on('data', chunk => { if (result.length < 1024 * 1024) result += chunk; else overflow = true; });
+  const ended = new Promise((resolveExit, reject) => {
+    child.once('error', error => { processError = error; });
+    // Wait for close, including after spawn/abort errors, before releasing streams/files.
+    child.once('close', code => code === 0 && !overflow && !processError ? resolveExit() : reject(new Error(op.signal.aborted ? 'Operation timed out or cancelled' : 'PostgreSQL command failed (exit ' + (code ?? 'unknown') + ')')));
+  }).catch(error => { transport.abort(); throw error; });
+  const earlyClose = error => allowEarlyInputClose && ['EPIPE', 'EOF', 'ERR_STREAM_PREMATURE_CLOSE'].includes(error.code);
+  const inputDone = input ? pipeline(input, op.meter(), child.stdin, { signal }).catch(error => {
+    if (!earlyClose(error)) transport.abort();
+    throw error;
+  }) : Promise.resolve();
+  const outputDone = output ? pipeline(child.stdout, output, { signal }).catch(error => {
+    transport.abort(); throw error;
+  }) : Promise.resolve();
+  const [processResult, inputResult, outputResult] = await Promise.allSettled([ended, inputDone, outputDone]);
+  if (processResult.status === 'rejected') throw processResult.reason;
+  if (outputResult.status === 'rejected') throw outputResult.reason;
+  if (inputResult.status === 'rejected' && !earlyClose(inputResult.reason)) throw inputResult.reason;
+  op.signal.throwIfAborted();
+  return result.trim();
 }

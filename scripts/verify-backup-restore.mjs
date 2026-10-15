@@ -15,29 +15,39 @@ export async function verifyBackup(file, options = {}) {
   const op = operation('restore', options);
   let handle, created = false;
   try {
-    handle = await open(resolve(file), 'r');
+    const filePath = resolve(file);
+    handle = await open(filePath, 'r');
     const stat = await handle.stat();
     const magic = Buffer.alloc(5); await handle.read(magic, 0, 5, 0);
     if (!stat.isFile() || magic.toString() !== 'PGDMP') throw new Error('Expected a PostgreSQL custom-format backup');
-    const stream = () => handle.createReadStream({ start: 0, autoClose: false });
+    const sameFile = current => current.dev === stat.dev && current.ino === stat.ino && current.size === stat.size && current.mtimeMs === stat.mtimeMs;
+    // Each pass owns its descriptor: pipeline destroys stdin on a legitimate early
+    // TOC exit, which can close even a shared FileHandle's autoClose:false stream.
+    const stream = async () => {
+      const input = await open(filePath, 'r');
+      try {
+        if (!sameFile(await input.stat())) throw new Error('Backup file changed during verification');
+        return input.createReadStream();
+      } catch (error) { await input.close(); throw error; }
+    };
     op.phase('hashing saved file');
     const hash = createHash('sha256');
-    await pipeline(stream(), op.meter(), new Writable({ write(chunk, _encoding, done) { hash.update(chunk); done(); } }), { signal: op.signal });
+    await pipeline(await stream(), op.meter(), new Writable({ write(chunk, _encoding, done) { hash.update(chunk); done(); } }), { signal: op.signal });
     const sha256 = hash.digest('hex');
     op.phase('checking archive');
-    await run('pg_restore', ['--list'], { input: stream(), output: new Writable({ write(_chunk, _encoding, done) { done(); } }), op });
+    await run('pg_restore', ['--list'], { input: await stream(), output: new Writable({ write(_chunk, _encoding, done) { done(); } }), op });
     op.phase('creating isolated database');
     try { await run('createdb', ['--template=template0', database], { op }); created = true; }
     catch { throw new Error(`Database creation failed or outcome unknown; inspect only ${database}`); }
     op.phase('restoring saved file');
-    await run('pg_restore', ['--exit-on-error', '--single-transaction', '--no-owner', '--no-privileges', '--dbname', database], { database, input: stream(), op });
+    await run('pg_restore', ['--exit-on-error', '--single-transaction', '--no-owner', '--no-privileges', '--dbname', database], { database, input: await stream(), op });
     op.phase('checking restored application tables');
     const sql = `SELECT json_build_object('migrations', (SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL), 'mail', (SELECT count(*) FROM "EmailMessage"), 'rawMail', (SELECT count(*) FROM "EmailMessage" WHERE "rawSource" IS NOT NULL), 'contacts', (SELECT count(*) FROM "Contact"), 'projects', (SELECT count(*) FROM "Project"), 'tasks', (SELECT count(*) FROM "Task"), 'events', (SELECT count(*) FROM "AgentEvent"), 'notifications', (SELECT count(*) FROM "NotificationDelivery"))`;
     const counts = JSON.parse(await run('psql', ['-X', '--set=ON_ERROR_STOP=1', '-At', '-c', sql], { database, op }));
     if (!counts.migrations || Object.values(counts).some(value => !Number.isSafeInteger(value) || value < 0)) throw new Error('Invalid restored application schema');
     if (options.validate) await options.validate({ database, run, op, counts });
     const after = await handle.stat();
-    if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs) throw new Error('Backup file changed during verification');
+    if (!sameFile(after)) throw new Error('Backup file changed during verification');
     op.phase('verification complete');
     return { sha256, bytes: stat.size, counts };
   } finally {
