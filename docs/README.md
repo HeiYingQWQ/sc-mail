@@ -8,7 +8,7 @@
 | [MAIL_PROCESSING](MAIL_PROCESSING.md) | 发件规则、重要性与通知、机器资料、二次审计和日报 |
 | [OPERATIONS](OPERATIONS.md) | 升级、同步恢复/对账、回调、删除、备份恢复及开发验证 |
 | [AGENT_INTEGRATION](AGENT_INTEGRATION.md) | 固定版本 OpenClaw 的 Docker Desktop 安装、MCP/Skill、WhatsApp 和排错 |
-| [CHANGELOG_V0](CHANGELOG_V0.md) | V0.x 开发里程碑与历史验收；当前 V0.9.5 |
+| [CHANGELOG_V0](CHANGELOG_V0.md) | V0.x 开发里程碑与历史验收；当前 V0.9.6 |
 
 工具指导见 [sc-mail Skill](../skills/sc-mail/SKILL.md)，Linux 同机部署见 [部署 Skill](../skills/sc-mail-openclaw-deploy/SKILL.md)，模板安装见 [OpenClaw 桥接目录](../openclaw-stack/README.md)。安装 Skill 不等于服务、自动唤醒或渠道已接通。
 

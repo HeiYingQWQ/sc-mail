@@ -8,7 +8,7 @@
 
 SC Mail 是独立商务邮件服务，保存邮件证据、联系人/公司、项目/Topic、任务、需求、决策、摘要和来源历史。产品与 Dashboard 使用 SC Mail；`ai-mail` CLI、API/Agent/MCP 标识保留兼容。
 
-支持用户自然语言、邮件事件、定时任务三种入口。手机会话复用 Agent 宿主渠道，当前接入 OpenClaw WhatsApp，内置 Telegram 桥接可选。手机对话有用户可用反馈，独立端到端验收仍待完成。Hermes、Codex、Claude 等兼容性未经验证。
+支持用户自然语言、邮件事件、定时任务三种入口。手机会话复用 Agent 宿主渠道，当前接入 OpenClaw WhatsApp，通知仅支持 WhatsApp。手机对话有用户可用反馈，独立端到端验收仍待完成。Hermes、Codex、Claude 等兼容性未经验证。
 
 核心服务不依赖 Agent 在线。Agent 通过 API/CLI/MCP 查询或执行获授权业务操作，不直接连接业务数据库。Skill 是使用指导；安装不启动程序、不配置 MCP，也不建立唤醒。
 
@@ -29,7 +29,7 @@ flowchart LR
   Wake --> W --> Agent
   Agent -->|领取与完成事件| API
   API --> Notify[通知 outbox]
-  Notify --> W --> Channel[WhatsApp relay / Telegram]
+  Notify --> W --> Channel[WhatsApp relay]
 ```
 
 | 实际路径 | 职责 |
@@ -45,7 +45,7 @@ flowchart LR
 | `prisma/schema.prisma`、`prisma/migrations` | 实际模型与迁移 |
 | `skills/sc-mail`、`openclaw-stack` | 通用工具指导、宿主接入与独立 Compose |
 
-backend/worker 使用同一构建产物，Compose 数据卷保存证据和事实。当前运维按一个 worker 部署；Telegram 增加副本前须解决 leader 锁，不能因部分队列有行锁宣称所有后台流程支持任意扩容。
+backend/worker 使用同一构建产物，Compose 数据卷保存证据和事实。当前运维按一个 worker 部署，不能因部分队列有行锁宣称所有后台流程支持任意扩容。
 
 ## 数据与来源
 
@@ -61,7 +61,7 @@ backend/worker 使用同一构建产物，Compose 数据卷保存证据和事实
 | Task、TaskEvidence、Requirement、Decision | 有来源、版本、人工覆盖和证据的事实 |
 | Summary、SummaryVersion、TimelineEvent、BusinessOperation | 摘要版本、项目时间线、操作者/操作 ID 和前后值 |
 | AgentEvent、AgentWakeupDelivery、NotificationDelivery | 业务事件、唤醒和投递三个独立状态 |
-| DashboardUser、DashboardSession、Telegram 状态模型 | 登录与可选聊天桥接 |
+| DashboardUser、DashboardSession | Dashboard 登录与会话 |
 
 没有独立 EmailThread 表；邮件有 threadId 和 RFC 回复头。入库唯一键为账号/providerMessageId，以及账号/文件夹/UIDVALIDITY/UID。RFC Message-ID 不全库唯一，文件夹可留副本；详情导航按账号隔离并合并同 RFC ID 的逻辑邮件。
 
@@ -143,3 +143,5 @@ Dashboard 用 HttpOnly Cookie，首次改密、数据库会话与改密撤销。
 官网、地址、备注与成员由用户维护，不从签名、域名或网站自动填写。公司新成员不自动加入现有项目；移除成员不删除历史邮件，更换公司同时校验项目联系人。一个邮件只有一个当前主项目，多项目事实留待确认。新增联系人匹配历史不重发通知、不改分类或自动创建任务。
 
 项目详情按概览、邮件往来、分析记录分区，展示公司/联系人、当前阶段、双方待办/等待、来源与摘要覆盖/新鲜度；不臆造完成百分比。正文导航展示真实回复关系，项目邮件只列本项目归属。摘要只用本项目已归属来源，人工移动使原/新项目摘要待更新；旧引用不重复当成新增事实。摘要更新失败不阻断已经确认的合格项目通知，重试保持幂等。
+
+Telegram 通知与内置聊天桥接已停用；历史 Telegram 表、迁移和投递记录保留，不再读取或投递其队列，不自动转发到 WhatsApp。

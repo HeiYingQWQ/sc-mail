@@ -268,7 +268,7 @@ MCP 暴露事件处理能力：`list_agent_events`、`claim_agent_events`、`ren
 
 ### 通知请求
 
-单个请求形如 `{ "requestKey":"稳定的调用方幂等键", "channel":"telegram", "recipientRef":"chat-id", "content":"..." }`。渠道必须出现在 `NOTIFICATION_ALLOWED_CHANNELS`，收件目标必须精确出现在 `NOTIFICATION_ALLOWED_RECIPIENTS`。默认为无允许目标，故请求会被拒绝。`requestKey` 重用但内容不同返回冲突。worker 支持 Telegram 和可选 OpenClaw WhatsApp relay；各 sender 须另行配置。确定性可重试错误有界退避；网络结果或租约到期不明时为 `unknown`，抑制自动重发。`GET /api/v1/mail/notifications/:id` 查询状态，`delivered` 表示相应 sender/渠道确认接受，不表示用户已读；`GET /api/v1/mail/integrations/status` 查看队列汇总。不得用客户邮件作为通知渠道。
+单个请求形如 `{ "requestKey":"稳定的调用方幂等键", "channel":"whatsapp", "recipientRef":"+15555550123", "content":"..." }`。渠道必须出现在 `NOTIFICATION_ALLOWED_CHANNELS`，收件目标必须精确出现在 `NOTIFICATION_ALLOWED_RECIPIENTS`。默认为无允许目标，故请求会被拒绝。`requestKey` 重用但内容不同返回冲突。worker 仅支持 OpenClaw WhatsApp relay；其他 channel 返回 NOTIFICATION_CHANNEL_UNSUPPORTED，sender 须另行配置。确定性可重试错误有界退避；网络结果或租约到期不明时为 `unknown`，抑制自动重发。`GET /api/v1/mail/notifications/:id` 查询状态，`delivered` 表示相应 sender/渠道确认接受，不表示用户已读；`GET /api/v1/mail/integrations/status` 查看队列汇总。不得用客户邮件作为通知渠道。
 
 幂等重放 `complete` 会返回已完成事件及通知记录；对同一个事件重复完成应提交相同 result。当前 API token 是共享凭据，`agentId` 仅标识租约拥有者，不构成多用户身份认证。
 

@@ -47,7 +47,11 @@
     "prisma:generate": "prisma generate",
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
-    "db:status": "prisma migrate status"
+    "db:status": "prisma migrate status",
+    "verify:backup": "node scripts/verify-backup.mjs",
+    "verify:backup-postgres": "node scripts/verify-backup-postgres.mjs",
+    "verify:integration-local": "node scripts/acceptance.cjs",
+    "verify:whatsapp": "node scripts/verify-whatsapp.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

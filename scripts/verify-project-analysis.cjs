@@ -23,7 +23,7 @@ const testUrl = new URL(adminUrl); testUrl.pathname = `/${dbName}`;
 const admin = new PrismaClient({ datasourceUrl: adminUrl });
 const settings = {
   IMAP_EMAIL: 'project-analysis-owner@test.invalid', IMAP_HOST: 'imap.test.invalid', BUSINESS_TIMEZONE: 'Europe/Rome',
-  DATABASE_URL: testUrl.toString(), NOTIFICATION_ALLOWED_CHANNELS: 'telegram', NOTIFICATION_ALLOWED_RECIPIENTS: '123456',
+  DATABASE_URL: testUrl.toString(), NOTIFICATION_ALLOWED_CHANNELS: 'whatsapp', NOTIFICATION_ALLOWED_RECIPIENTS: '+15555550123',
 };
 const config = { get: (key, fallback) => settings[key] === undefined ? fallback : settings[key] };
 let db; let created = false; let sequence = 0;
@@ -421,7 +421,7 @@ async function main() {
     assert.ok(claim, `synthetic event ${eventId} is claimable`);
     return eventsService.complete(eventId, { agentId: 'synthetic-agent', leaseToken: claim.leaseToken, result, notifications });
   }
-  const send = (key, content='Synthetic project update notification') => ({ requestKey: key, channel: 'telegram', recipientRef: '123456', content });
+  const send = (key, content='Synthetic project update notification') => ({ requestKey: key, channel: 'whatsapp', recipientRef: '+15555550123', content });
 
   const incoming = await createMessage(account.id, member, { at: new Date('2026-08-14T10:00:00Z'), body: 'Germany exhibition booth progress update: lighting plan is approved.', historicalImport: false });
   const incomingCopy = await createMessage(account.id, member, { at: new Date('2026-08-12T10:00:00Z'), mailbox: 'Archive', rfcMessageId: incoming.rfcMessageId, body: incoming.bodyText, historicalImport: false });
@@ -469,7 +469,7 @@ async function main() {
   // Delivered/uncertain external sends are never woken again when classification later finds a project.
   const deliveredMail = await createMessage(account.id, member, { at: new Date('2026-08-16T10:00:00Z'), body: 'Germany exhibition booth materials update is confirmed.' });
   const deliveredEvent = await makeRealtimeEvent(deliveredMail, { status: 'completed' });
-  await db.notificationDelivery.create({ data: { requestKey: 'already-delivered-project-event', requestHash: 'synthetic-hash', eventId: deliveredEvent.id, channel: 'telegram', recipientRef: '123456', content: 'Synthetic prior delivery', status: 'delivered', deliveredAt: new Date() } });
+  await db.notificationDelivery.create({ data: { requestKey: 'already-delivered-project-event', requestHash: 'synthetic-hash', eventId: deliveredEvent.id, channel: 'whatsapp', recipientRef: '+15555550123', content: 'Synthetic prior delivery', status: 'delivered', deliveredAt: new Date() } });
   await db.agentWakeupDelivery.update({ where: { eventId: deliveredEvent.id }, data: { status: 'delivered', deliveredAt: new Date() } });
   const deliveredJobId = await db.$transaction((tx) => service.enqueueIncoming(tx, deliveredMail.id));
   await runJob(service, deliveredJobId);
@@ -577,7 +577,7 @@ async function main() {
     priority: 10, notificationPolicy: 'REALTIME', payloadJson: { classification: 'BUSINESS_HUMAN', importance: 'urgent', notificationRequired: true },
   } });
   await db.agentWakeupDelivery.create({ data: { eventId: claimedSystemEvent.id } });
-  await db.notificationDelivery.create({ data: { requestKey: 'system-sender-claim-notification', requestHash: 'synthetic-system-sender', eventId: claimedSystemEvent.id, channel: 'telegram', recipientRef: '123456', content: 'Synthetic must stay silent.' } });
+  await db.notificationDelivery.create({ data: { requestKey: 'system-sender-claim-notification', requestHash: 'synthetic-system-sender', eventId: claimedSystemEvent.id, channel: 'whatsapp', recipientRef: '+15555550123', content: 'Synthetic must stay silent.' } });
   assert.deepEqual(await events.claim('synthetic-agent', 1, 60, claimedSystemEvent.id), [], 'a configured From cannot be claimed even with urgent/whitelist-like payload');
   const ignoredSystemEvent = await db.agentEvent.findUniqueOrThrow({ where: { id: claimedSystemEvent.id }, include: { wakeupDelivery: true, notifications: true } });
   assert.equal(ignoredSystemEvent.status, 'ignored');
@@ -591,14 +591,14 @@ async function main() {
   await db.agentWakeupDelivery.updateMany({ where: { status: 'pending' }, data: { status: 'failed', lastError: 'synthetic outbox isolation' } });
   await db.agentWakeupDelivery.create({ data: { eventId: systemOutboxEvent.id } });
   await db.notificationDelivery.updateMany({ where: { status: 'pending' }, data: { status: 'failed', lastError: 'synthetic outbox isolation' } });
-  const outboxNotification = await db.notificationDelivery.create({ data: { requestKey: 'system-sender-sendtime-notification', requestHash: 'synthetic-system-sender-sendtime', eventId: systemOutboxEvent.id, channel: 'telegram', recipientRef: '123456', content: 'Synthetic outbox must stay silent.' } });
+  const outboxNotification = await db.notificationDelivery.create({ data: { requestKey: 'system-sender-sendtime-notification', requestHash: 'synthetic-system-sender-sendtime', eventId: systemOutboxEvent.id, channel: 'whatsapp', recipientRef: '+15555550123', content: 'Synthetic outbox must stay silent.' } });
   let externalCalls = 0; const originalFetch = global.fetch;
   global.fetch = async () => { externalCalls++; throw new Error('External delivery is disabled in this isolated test'); };
   try {
-    const integrationConfig = { get: (key, fallback) => ({ AGENT_EVENT_WEBHOOK_URL: 'https://synthetic.invalid/webhook', TELEGRAM_BOT_TOKEN: 'synthetic-only', NOTIFICATION_ALLOWED_CHANNELS: 'telegram', NOTIFICATION_ALLOWED_RECIPIENTS: '123456' }[key] ?? fallback) };
+    const integrationConfig = { get: (key, fallback) => ({ AGENT_EVENT_WEBHOOK_URL: 'https://synthetic.invalid/webhook', OPENCLAW_WHATSAPP_NOTIFY_URL: 'https://synthetic.invalid/notify', AGENT_WEBHOOK_TOKEN: 'synthetic-only', NOTIFICATION_ALLOWED_CHANNELS: 'whatsapp', NOTIFICATION_ALLOWED_RECIPIENTS: '+15555550123' }[key] ?? fallback) };
     const integrations = new AgentIntegrationService(db, integrationConfig, service, { warn() {}, info() {}, error() {} }, systemMailSenders);
     await integrations.deliverAgentWakeup();
-    await integrations.deliverNotificationForChannel('telegram');
+    await integrations.deliverNotificationForChannel('whatsapp');
   } finally { global.fetch = originalFetch; }
   assert.equal(externalCalls, 0, 'wakeup and notification outboxes never contact an Agent/provider for configured senders');
   const blockedWakeup = await db.agentWakeupDelivery.findUniqueOrThrow({ where: { eventId: systemOutboxEvent.id } });

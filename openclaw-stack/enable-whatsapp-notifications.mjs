@@ -53,7 +53,7 @@ if (aiMail.get('OPENCLAW_WHATSAPP_NOTIFY_URL') && aiMail.get('OPENCLAW_WHATSAPP_
   throw new Error('OPENCLAW_WHATSAPP_NOTIFY_URL is already configured differently; refusing to replace it.');
 }
 if (aiMail.get('AGENT_WEBHOOK_TOKEN') && aiMail.get('AGENT_WEBHOOK_TOKEN') !== hookToken && (
-  aiMail.get('AGENT_EVENT_WEBHOOK_URL') || aiMail.get('AGENT_CHAT_WEBHOOK_URL') || aiMail.get('OPENCLAW_WHATSAPP_NOTIFY_URL')
+  aiMail.get('AGENT_EVENT_WEBHOOK_URL') || aiMail.get('OPENCLAW_WHATSAPP_NOTIFY_URL')
 )) {
   throw new Error('A different Agent webhook already uses AGENT_WEBHOOK_TOKEN; refusing to overwrite active credentials.');
 }

@@ -43,14 +43,18 @@ const { recoverEvent: recoverMissedActionableEvent } = require('./recover-missed
 const dbName = `aimail_acceptance_${Date.now()}_${process.pid}`;
 assert.match(dbName, /^aimail_acceptance_\d+_\d+$/);
 const adminUrl = process.env.DATABASE_URL;
-assert.ok(adminUrl, 'Run through verify-integration.mjs with Docker Compose');
+assert.ok(adminUrl, 'Set DATABASE_URL to an isolated PostgreSQL server');
+assert.equal(process.env.INTEGRATION_ALLOW_LOCAL_DB_CREATE, '1', 'Explicit isolated database consent required');
+const parsedAdmin = new URL(adminUrl);
+assert.ok(['localhost', '127.0.0.1', '[::1]', 'postgres'].includes(parsedAdmin.hostname), 'Remote database refused');
+assert.doesNotMatch(parsedAdmin.pathname, /prod(?:uction)?/i);
 const testUrl = new URL(adminUrl); testUrl.pathname = `/${dbName}`;
 const admin = new PrismaClient({ datasourceUrl: adminUrl });
 let db, app, created = false, passed = 0, failures = [];
-const settings = { APP_ROLE: 'acceptance', IMAP_EMAIL: 'owner@acceptance.test', IMAP_HOST: 'imap.acceptance.test',
+const settings = { APP_ROLE: 'acceptance', IMAP_EMAIL: 'owner@acceptance.invalid', IMAP_HOST: 'imap.acceptance.invalid',
   IMAP_SYNC_FOLDERS: 'INBOX', IMAP_SYNC_PAGE_SIZE: 5, BUSINESS_TIMEZONE: 'Europe/Rome',
-  IMAP_API_TOKEN: randomUUID(), NOTIFICATION_ALLOWED_CHANNELS: 'telegram', NOTIFICATION_ALLOWED_RECIPIENTS: 'test-chat',
-  DASHBOARD_INITIAL_EMAIL: 'sales@acceptance.test', DASHBOARD_INITIAL_PASSWORD: 'initial-acceptance-password' };
+  IMAP_API_TOKEN: randomUUID(), NOTIFICATION_ALLOWED_CHANNELS: 'whatsapp', NOTIFICATION_ALLOWED_RECIPIENTS: '+15555550123',
+  DASHBOARD_INITIAL_EMAIL: 'sales@acceptance.invalid', DASHBOARD_INITIAL_PASSWORD: 'initial-acceptance-password' };
 const config = { get: (key, fallback) => settings[key] === undefined ? fallback : settings[key] };
 const logger = { info() {}, warn() {}, error() {} };
 const now = new Date();
@@ -87,7 +91,7 @@ async function test(name, fn) {
 }
 function mail(from = 'client@customer.test', subject = 'Acceptance project', body = 'Please send the revised drawing.', date = now) {
   const uid = ++seq;
-  return { uid, receivedAt: date, rawSource: Buffer.from(`From: ${from}\r\nTo: owner@acceptance.test\r\nSubject: ${subject}\r\nMessage-ID: <acceptance-${uid}@example.test>\r\nDate: ${date.toUTCString()}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`) };
+  return { uid, receivedAt: date, rawSource: Buffer.from(`From: ${from}\r\nTo: owner@acceptance.invalid\r\nSubject: ${subject}\r\nMessage-ID: <acceptance-${uid}@example.test>\r\nDate: ${date.toUTCString()}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`) };
 }
 function mailWithHeader(from, subject, body, header) {
   const wire = mail(from, subject, body);
@@ -99,11 +103,11 @@ function dsnMail(recipient, messageId = '<priority-dsn-1@example.test>', deliver
   const uid = ++seq;
   const boundary = `dsn-${uid}-boundary`;
   const rawSource = [
-    'From: Mail Delivery Subsystem <mailer-daemon@whitelist.test>', 'To: owner@acceptance.test',
+    'From: Mail Delivery Subsystem <mailer-daemon@whitelist.test>', 'To: owner@acceptance.invalid',
     'Subject: Delivery Status Notification (Failure)', `Message-ID: ${messageId}`,
     `Content-Type: multipart/report; report-type=delivery-status; boundary="${boundary}"`, '',
     `--${boundary}`, 'Content-Type: text/plain; charset=utf-8', '', 'Delivery failed.',
-    `--${boundary}`, 'Content-Type: message/delivery-status', '', 'Reporting-MTA: dns; mx.acceptance.test', '',
+    `--${boundary}`, 'Content-Type: message/delivery-status', '', 'Reporting-MTA: dns; mx.acceptance.invalid', '',
     `Final-Recipient: rfc822; ${recipient}`, 'Action: failed', 'Status: 5.1.1',
     'Diagnostic-Code: smtp; 550 5.1.1 recipient address rejected',
     ...(deliveredRecipient ? ['', `Final-Recipient: rfc822; ${deliveredRecipient}`, 'Action: delivered', 'Status: 2.0.0'] : []),
@@ -142,7 +146,7 @@ async function api(path, method = 'GET', body, token = settings.IMAP_API_TOKEN) 
   return { status: response.status, body: await response.json() };
 }
 async function createAcceptanceProject(name, key) {
-  const contact = await contacts.createContact({ email: `${key}@acceptance.test`, displayName: `${key} Contact`, operationId: `${key}-contact` });
+  const contact = await contacts.createContact({ email: `${key}@acceptance.invalid`, displayName: `${key} Contact`, operationId: `${key}-contact` });
   const company = await contacts.createCompany({ name: `${key} Company`, contactIds: [contact.id], operationId: `${key}-company` });
   return projects.createProject({ name, companyId: company.id, contactIds: [contact.id], operationId: `${key}-project` });
 }
@@ -767,7 +771,7 @@ async function main() {
     const claims = await Promise.all([events.claim('a', 1, 60, event.id), events.claim('b', 1, 60, event.id)]); assert.equal(claims.flat().length, 1);
     await db.agentEvent.update({ where: { id: event.id }, data: { leaseExpiresAt: new Date(0) } });
     const [claimed] = await events.claim('recovered', 1, 60, event.id); assert.ok(claimed);
-    const body = { agentId: 'recovered', leaseToken: claimed.leaseToken, result: { z: 1, a: 2 }, notifications: [{ requestKey: 'notify-once', channel: 'telegram', recipientRef: 'test-chat', content: 'Synthetic acceptance notification' }] };
+    const body = { agentId: 'recovered', leaseToken: claimed.leaseToken, result: { z: 1, a: 2 }, notifications: [{ requestKey: 'notify-once', channel: 'whatsapp', recipientRef: '+15555550123', content: 'Synthetic acceptance notification' }] };
     await assert.rejects(events.complete(event.id, { ...body, notifications: [{ ...body.notifications[0], recipientRef: 'not-allowed' }] }), e => e.status === 409);
     await events.complete(event.id, body); assert.equal((await events.complete(event.id, body)).replayed, true);
     assert.equal(await db.notificationDelivery.count({ where: { eventId: event.id } }), 1);
@@ -801,7 +805,7 @@ async function main() {
       await assert.rejects(events.complete(event.id, { ...base, result: {} }), error => error.status === 400 && error.response?.code === 'ACTIONABLE_DECISION_REQUIRED');
       await assert.rejects(events.complete(event.id, { ...base, result: { actionable: true } }), error => error.status === 409 && error.response?.code === 'ACTIONABLE_NOTIFICATION_REQUIRED');
       assert.equal(await db.notificationDelivery.count({ where: { eventId: event.id } }), 0);
-      const notice = { requestKey: `acceptance-actionable-${importance}-notice`, channel: 'telegram', recipientRef: 'test-chat', content: '客户请求需要跟进' };
+      const notice = { requestKey: `acceptance-actionable-${importance}-notice`, channel: 'whatsapp', recipientRef: '+15555550123', content: '客户请求需要跟进' };
       const completion = { ...base, result: { actionable: true }, notifications: [notice] };
       assert.equal((await events.complete(event.id, completion)).notifications.length, 1);
       assert.equal((await events.complete(event.id, completion)).replayed, true);
@@ -823,7 +827,7 @@ async function main() {
     const [claimed] = await events.claim('acceptance-explicit-decline', 1, 60, event.id);
     assert.ok(claimed);
     const completion = { agentId: 'acceptance-explicit-decline', leaseToken: claimed.leaseToken, result: { actionable: false, reason: 'Clear refusal without a request or next action.' } };
-    await assert.rejects(events.complete(event.id, { ...completion, notifications: [{ requestKey: 'decline-must-stay-silent', channel: 'telegram', recipientRef: 'test-chat', content: 'Must not be queued' }] }),
+    await assert.rejects(events.complete(event.id, { ...completion, notifications: [{ requestKey: 'decline-must-stay-silent', channel: 'whatsapp', recipientRef: '+15555550123', content: 'Must not be queued' }] }),
       error => error.status === 409 && error.response?.code === 'NON_ACTIONABLE_NOTIFICATION_BLOCKED');
     assert.equal(await db.notificationDelivery.count({ where: { eventId: event.id } }), 0);
     assert.equal((await events.complete(event.id, completion)).notifications.length, 0);
@@ -1015,7 +1019,7 @@ async function main() {
     await db.emailMessage.update({ where: { id: (await messageFor(inbound)).id }, data: { contactId: contact.id } });
     const before = (await brief.get('2026-01-15', undefined, false)).total;
     const sentDate = new Date('2026-01-15T10:00:00Z');
-    const outgoing = Buffer.from('From: owner@acceptance.test\r\nTo: Other <other@example.test>\r\nCc: Recipient <recipient@customer.test>\r\nSubject: Sent acceptance\r\nMessage-ID: <sent-acceptance@example.test>\r\nDate: Thu, 15 Jan 2026 10:00:00 +0000\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nSent body');
+    const outgoing = Buffer.from('From: owner@acceptance.invalid\r\nTo: Other <other@example.test>\r\nCc: Recipient <recipient@customer.test>\r\nSubject: Sent acceptance\r\nMessage-ID: <sent-acceptance@example.test>\r\nDate: Thu, 15 Jan 2026 10:00:00 +0000\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nSent body');
     const normalized = await new EmailNormalizer().normalize({ mailbox: 'Sent', uidValidity: 1n, uid: 50001, rawSource: outgoing, receivedAt: sentDate, accountEmail: account.email });
     const sent = await db.emailMessage.create({ data: { ...normalized, mailAccountId: account.id, mailbox: 'Sent', uidValidity: 1n, uid: 50001, classification: 'OUTREACH_OUTBOUND' } });
     await db.processingRecord.create({ data: {
@@ -1125,25 +1129,20 @@ async function main() {
     const remainingFiltered = await analyzer.listAuditCandidates('filtered', 100, 0);
     assert.ok(!remainingFiltered.messages.some(message => message.id === candidate.id));
   });
-  await test('M14 webhook retry, daily event deduplication, Telegram delivery and chat bridge (mock transport)', async () => {
-    const savedFetch = global.fetch; let webhookMode = 'fail', sendMode = 'ok', eventCalls = 0, chatCalls = 0, sends = 0;
+  await test('M14 webhook retry, daily event deduplication, WhatsApp delivery (mock transport)', async () => {
+    const savedFetch = global.fetch; let webhookMode = 'fail', sendMode = 'ok', eventCalls = 0, sends = 0;
     const eventKeys = [];
-    Object.assign(settings, { AGENT_EVENT_WEBHOOK_URL: 'https://agent.acceptance.test/events', AGENT_CHAT_WEBHOOK_URL: 'https://agent.acceptance.test/chat',
-      AGENT_WEBHOOK_TOKEN: 'synthetic-webhook-token', TELEGRAM_BOT_TOKEN: 'synthetic-token', TELEGRAM_ALLOWED_CHAT_IDS: 'test-chat', TELEGRAM_ALLOWED_USER_IDS: 'test-user', DAILY_BRIEF_ENABLED: true, DAILY_BRIEF_TIME: '00:00', DAILY_BRIEF_LANGUAGE: 'zh-CN', DAILY_BRIEF_STYLE: 'concise', DAILY_BRIEF_WAITING_THRESHOLD_DAYS: 9, DAILY_BRIEF_FOLLOW_UP_WINDOW_DAYS: 5, DAILY_BRIEF_NOTIFY_WHEN_EMPTY: false });
+    Object.assign(settings, { AGENT_EVENT_WEBHOOK_URL: 'https://agent.acceptance.invalid/events', OPENCLAW_WHATSAPP_NOTIFY_URL: 'https://agent.acceptance.invalid/notify',
+      AGENT_WEBHOOK_TOKEN: 'synthetic-webhook-token', DAILY_BRIEF_ENABLED: true, DAILY_BRIEF_TIME: '00:00', DAILY_BRIEF_LANGUAGE: 'zh-CN', DAILY_BRIEF_STYLE: 'concise', DAILY_BRIEF_WAITING_THRESHOLD_DAYS: 9, DAILY_BRIEF_FOLLOW_UP_WINDOW_DAYS: 5, DAILY_BRIEF_NOTIFY_WHEN_EMPTY: false });
     global.fetch = async (url, options) => {
-      if (String(url).includes('agent.acceptance.test/events')) {
+      if (String(url).includes('agent.acceptance.invalid/events')) {
         eventCalls++; eventKeys.push(options.headers['Idempotency-Key']);
         return new Response('{}', { status: webhookMode === 'fail' ? 503 : 200 });
       }
-      if (String(url).includes('agent.acceptance.test/chat')) { chatCalls++; return Response.json({ text: 'Synthetic assistant reply' }); }
-      if (String(url).includes('/getUpdates')) return Response.json({ ok: true, result: [
-        { update_id: 1, message: { message_id: 1, chat: { id: 'unauthorized-chat' }, from: { id: 'test-user' }, text: 'Ignored' } },
-        { update_id: 2, message: { message_id: 2, chat: { id: 'test-chat' }, from: { id: 'test-user' }, text: 'Show today mail' } },
-      ] });
-      if (String(url).includes('api.telegram.org') && String(url).includes('/sendMessage')) {
+      if (String(url).includes('agent.acceptance.invalid/notify')) {
         sends++; if (sendMode === 'network') throw new Error('Simulated response loss');
-        if (sendMode === '429') return Response.json({ ok: false, error_code: 429, parameters: { retry_after: 1 } }, { status: 429 });
-        return Response.json({ ok: true, result: { message_id: 123 } });
+        if (sendMode === '503') return new Response('{}', { status: 503 });
+        return Response.json({ runId: '123', completion: { status: 'ok', delivered: true } });
       }
       throw new Error('Unexpected external request in acceptance');
     };
@@ -1161,28 +1160,25 @@ async function main() {
       await integrations.deliverNotification(); const delivered = await db.notificationDelivery.findUniqueOrThrow({ where: { requestKey: 'notify-once' } });
       assert.equal(delivered.status, 'delivered');
       const firstAttempts = delivered.attempts, firstProviderDeliveryId = delivered.providerDeliveryId;
-      assert.equal(firstAttempts, 1); assert.equal(firstProviderDeliveryId, '123');
+      assert.equal(firstAttempts, 1); assert.equal(firstProviderDeliveryId, 'openclaw:123');
       await integrations.deliverNotification();
       const deliveredAgain = await db.notificationDelivery.findUniqueOrThrow({ where: { requestKey: 'notify-once' } });
       assert.equal(deliveredAgain.status, 'delivered');
       assert.equal(deliveredAgain.attempts, firstAttempts);
       assert.equal(deliveredAgain.providerDeliveryId, firstProviderDeliveryId);
-      await db.notificationDelivery.create({ data: { requestKey: 'rate-limit', requestHash: 'fixture', channel: 'telegram', recipientRef: 'test-chat', content: 'Synthetic retry' } });
-      sendMode = '429'; await integrations.deliverNotification(); assert.equal((await db.notificationDelivery.findUniqueOrThrow({ where: { requestKey: 'rate-limit' } })).status, 'pending');
+      await db.notificationDelivery.create({ data: { requestKey: 'rate-limit', requestHash: 'fixture', channel: 'whatsapp', recipientRef: '+15555550123', content: 'Synthetic retry' } });
+      sendMode = '503'; await integrations.deliverNotification(); assert.equal((await db.notificationDelivery.findUniqueOrThrow({ where: { requestKey: 'rate-limit' } })).status, 'pending');
       await db.notificationDelivery.update({ where: { requestKey: 'rate-limit' }, data: { nextAttemptAt: new Date(0) } });
       sendMode = 'network'; await integrations.deliverNotification(); assert.equal((await db.notificationDelivery.findUniqueOrThrow({ where: { requestKey: 'rate-limit' } })).status, 'unknown');
       const uncertainSends = sends; await integrations.deliverNotification(); assert.equal(sends, uncertainSends);
-      sendMode = 'ok'; await integrations.pollTelegram(); await integrations.pollTelegram(); assert.equal(await db.telegramInboxMessage.count(), 1);
-      await integrations.processTelegramMessage(); await integrations.processTelegramMessage();
-      assert.equal(chatCalls, 1); assert.equal((await db.telegramInboxMessage.findFirstOrThrow()).status, 'completed');
     } finally {
       global.fetch = savedFetch;
-      for (const key of ['AGENT_EVENT_WEBHOOK_URL','AGENT_CHAT_WEBHOOK_URL','AGENT_WEBHOOK_TOKEN','TELEGRAM_BOT_TOKEN','TELEGRAM_ALLOWED_CHAT_IDS','TELEGRAM_ALLOWED_USER_IDS','DAILY_BRIEF_ENABLED','DAILY_BRIEF_TIME','DAILY_BRIEF_LANGUAGE','DAILY_BRIEF_STYLE','DAILY_BRIEF_WAITING_THRESHOLD_DAYS','DAILY_BRIEF_FOLLOW_UP_WINDOW_DAYS','DAILY_BRIEF_NOTIFY_WHEN_EMPTY']) delete settings[key];
+      for (const key of ['AGENT_EVENT_WEBHOOK_URL','OPENCLAW_WHATSAPP_NOTIFY_URL','AGENT_WEBHOOK_TOKEN','DAILY_BRIEF_ENABLED','DAILY_BRIEF_TIME','DAILY_BRIEF_LANGUAGE','DAILY_BRIEF_STYLE','DAILY_BRIEF_WAITING_THRESHOLD_DAYS','DAILY_BRIEF_FOLLOW_UP_WINDOW_DAYS','DAILY_BRIEF_NOTIFY_WHEN_EMPTY']) delete settings[key];
     }
   });
   await test('M14 WhatsApp E.164 recipient validation and confirmed delivery (mock transport)', async () => {
     const savedFetch = global.fetch; const savedSettings = { ...settings }; let payload; const recipient = '+15555550123';
-    Object.assign(settings, { OPENCLAW_WHATSAPP_NOTIFY_URL: 'https://openclaw.acceptance.test/hooks/agent', AGENT_WEBHOOK_TOKEN: 'synthetic-webhook-token',
+    Object.assign(settings, { OPENCLAW_WHATSAPP_NOTIFY_URL: 'https://openclaw.acceptance.invalid/hooks/agent', AGENT_WEBHOOK_TOKEN: 'synthetic-webhook-token',
       NOTIFICATION_ALLOWED_CHANNELS: 'whatsapp', NOTIFICATION_ALLOWED_RECIPIENTS: recipient });
     global.fetch = async (url, options) => {
       assert.equal(String(url), settings.OPENCLAW_WHATSAPP_NOTIFY_URL); payload = JSON.parse(options.body);
@@ -1335,7 +1331,7 @@ async function main() {
     } });
     await db.notificationDelivery.create({ data: {
       eventId: alreadyNotified.id, requestKey: 'acceptance-already-notified', requestHash: 'fixture',
-      channel: 'telegram', recipientRef: 'test-chat', content: 'Existing notification', status: 'delivered',
+      channel: 'whatsapp', recipientRef: '+15555550123', content: 'Existing notification', status: 'delivered',
     } });
     const rejected = { eventId: alreadyNotified.id, operationId: 'acceptance-recover-already-notified', apply: false };
     assert.deepEqual(await recoverMissedActionableEvent(db, senderRuleSnapshotAction, Prisma, rejected), { eligible: 0, requeued: 0, replayed: 0 });

@@ -1,13 +1,13 @@
 # SC Mail
 
-当前开发进度 **V0.9.5**。独立商务邮件服务：TypeScript/NestJS、PostgreSQL、Prisma、pg-boss、自建 IMAP。产品及 Dashboard 使用 SC Mail；`ai-mail` CLI/API/Agent 标识保留兼容。首版不自动向客户发信。
+当前开发进度 **V0.9.6**。独立商务邮件服务：TypeScript/NestJS、PostgreSQL、Prisma、pg-boss、自建 IMAP。产品及 Dashboard 使用 SC Mail；`ai-mail` CLI/API/Agent 标识保留兼容。首版不自动向客户发信。
 
 ## 当前能力
 
 - 初始/增量同步、确定性分类、异步重要性分流、恢复对账与删除核对；原始邮件、业务事实和审计持久化。
 - 手动多邮箱 CRM、公司成员、项目/Topic、任务/需求/决策、人工复核、来源证据、AI 建议、摘要版本、时间线及业务日报。
 - Dashboard 支持 CRM、项目分析与详情分区、正文/关联导航、投递失败报告和系统发件地址管理。API/CLI/MCP 共用业务规则；联系人/公司/项目支持受控增删改查，软删除保留邮件证据。
-- OpenClaw MCP、事件 hook 与受控 WhatsApp relay 已有本机实测；CRM/项目/分析工具已接入，4 项投递报告工具仍被宿主过滤。手机对话有可用反馈，完整链路仍待独立验收。Hermes、Codex、Claude 未验证；Telegram 为可选桥接。
+- OpenClaw MCP、事件 hook 与受控 WhatsApp relay 已有本机实测；CRM/项目/分析工具已接入，4 项投递报告工具仍被宿主过滤。手机对话有可用反馈，完整链路仍待独立验收。Hermes、Codex、Claude 未验证；通知仅支持 WhatsApp。
 - IMAP 默认持久轮询 60 秒，尚无常驻 IDLE；对账默认业务时区每日 05:00，删除同步启用时默认每 4 小时。时间存 UTC，业务时区默认 Europe/Rome。已发与往来查询只覆盖受管 IMAP 副本，外部 SMTP 无副本不可见。
 
 当前代码包含 27 条迁移；部署健康必须实时查询。历史开发、验证与部署结果只维护在 [版本日志](docs/CHANGELOG_V0.md)，不代表当前持续健康或完整生产验收。
@@ -40,8 +40,8 @@ API：`http://localhost:3000/api/v1`，Bearer IMAP_API_TOKEN。CLI 使用 AI_MAI
 - OpenClaw 投递报告工具授权、其他 Agent 兼容性、Linux 服务器部署及真实模型端点的独立验证。
 - 旧项目复核内联确认流程的浏览器复验；全页面响应式/移动端视觉、长地址溢出、慢网络及规模性能观察。局部手机布局通过不代表全页面通过。
 - 真实上下/行间回复、父邮件缺失和引用改写样本；当前正文投影存在无法可靠分离历史的边界。
-- IMAP/Agent 离线、重启、慢模型与多 worker 演练；当前按单 worker，Telegram 扩副本前需 leader 锁。
-- 离机备份、完整恢复及连续运行观察；新备份可读/哈希一致不等于恢复成功，流式备份缺少总时限和进度报告。
+- IMAP/Agent 离线、重启、慢模型与多 worker 演练；当前按单 worker。
+- 离机备份、完整恢复及连续运行观察；已具备限时、进度和指定备份文件的隔离恢复验证，仍需真实离机副本与完整应用恢复验收。
 - NestJS 旧 wildcard 路由启动警告；人工复核和历史失败需按实际状态处理，不直接清空或重放。
 - 待规划：需求/决策及 AI 建议界面、故障恢复入口、复核可读说明、契约一致性、对账成本测量、Campaign 兼容核查和 IMAP IDLE。待办不构成新开发授权。
 

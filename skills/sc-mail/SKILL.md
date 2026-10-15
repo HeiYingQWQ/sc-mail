@@ -116,3 +116,5 @@ Mail reconciliation is an operator action. Inspect GET /mail/reconciliation/stat
 - Summary apply requires the exact summary version used by the model. On `SUMMARY_INPUT_STALE`, reanalyze; never substitute the newest `expectedVersion` into an older result.
 - On `FACT_REANALYSIS_REVIEW_REQUIRED`, inspect the source-backed review and existing candidate records. Unchanged proposals reuse facts; wording/evidence changes do not authorize duplicate facts. Resolve uncertain matching through an explicit user decision and existing manual record tools, or dismiss a duplicate proposal.
 - Task PATCH preserves omitted fields and clears explicit nulls. Send coherent project/Topic and deadline/timezone combinations; task movement recomputes both projects. Readiness alone does not prove a send/delivery task completed.
+
+通知仅使用 WhatsApp（channel=whatsapp）；Telegram 已移除，不请求旧渠道，不把历史 Telegram 记录转投。

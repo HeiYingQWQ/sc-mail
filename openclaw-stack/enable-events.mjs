@@ -56,7 +56,7 @@ if (hookToken.length < 24 || /[\r\n]/.test(hookToken)) throw new Error('OPENCLAW
 const eventUrl = `${gatewayBaseUrl(openclaw)}/hooks/ai-mail-event`;
 const publicApiUrl = mailApiUrl(openclaw, aiMail);
 if (aiMail.get('AGENT_EVENT_WEBHOOK_URL') && aiMail.get('AGENT_EVENT_WEBHOOK_URL') !== eventUrl) throw new Error('AGENT_EVENT_WEBHOOK_URL is already configured differently; refusing to replace it.');
-if (aiMail.get('AGENT_WEBHOOK_TOKEN') && aiMail.get('AGENT_WEBHOOK_TOKEN') !== hookToken && (aiMail.get('AGENT_EVENT_WEBHOOK_URL') || aiMail.get('AGENT_CHAT_WEBHOOK_URL'))) {
+if (aiMail.get('AGENT_WEBHOOK_TOKEN') && aiMail.get('AGENT_WEBHOOK_TOKEN') !== hookToken && (aiMail.get('AGENT_EVENT_WEBHOOK_URL'))) {
   throw new Error('A different Agent webhook already uses AGENT_WEBHOOK_TOKEN; refusing to overwrite active credentials.');
 }
 

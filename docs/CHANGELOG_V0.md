@@ -1,6 +1,6 @@
 # V0 开发日志
 
-当前进度 **V0.9.5**。本文件集中保存 V0.x 开发、历史验证和部署结果；当前能力/待办见 [README](../README.md)。
+当前进度 **V0.9.6**。本文件集中保存 V0.x 开发、历史验证和部署结果；当前能力/待办见 [README](../README.md)。
 
 V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代表当时正式发布；早期 Git 没有逐阶段提交，累计验收不证明每阶段的独立发布日期。保留有证据的日期/区间，不补齐中间编号。
 
@@ -95,3 +95,12 @@ V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代�
 - 本次验证：19 份 Markdown 的 107 个本地链接/锚点、14 个历史 Git 入口、12 版行数、根文档 <5 KB、hook 9 场景及 10 段 PowerShell 语法通过；模板/npm 版本未变。
 - 16 段 API/邮件/Agent 契约示例完整保留；提交 02a25de/ab1393d 的完整 GitHub CI 成功。用户随后授权原实现 Agent 复审、合并和删分支，本次复审来源与最终合并状态见 PR #3，后续默认独立审查规则不变。
 - 证据：[PR #3](https://github.com/HeiYingQWQ/sc-mail/pull/3)、[已通过 CI](https://github.com/HeiYingQWQ/sc-mail/actions/runs/37649847626)、[当前专题目录](README.md)、[合并规则](../AGENTS.md#github-分支与合并)、[推送 hook](../.githooks/pre-push)。
+
+## V0.9.6 · P0 隔离回归、文件恢复与 WhatsApp 单渠道（2026-10-15）
+- CI 增加同步恢复、分流租约、规则/AI/任务、完整合成集成、系统发件人及备份/WhatsApp 回归；外部邮箱、模型和渠道不参与测试。
+- 备份增加总时限、阶段/字节进度和失败清理；恢复必须提供已保存文件，校验 SHA-256/TOC，在唯一临时库恢复并检查业务表，清理有独立时限。
+- 移除 Telegram 通知、轮询、聊天回调和配置入口；API/MCP 仅接受 WhatsApp，历史表/迁移/投递保留且不转投，无 Schema 变化。
+- 本地验证：构建/类型检查、契约 83 次、Dashboard 51、修复 19、同步恢复 18、租约 9、合成集成 53；CRM/项目分析/系统发件人及 CLI→HTTP 33 项通过。
+- 备份/进程故障 14 项、WhatsApp 模拟传输 8 项通过；独立审查发现的 Alpine timeout 与大归档 TOC 提前关闭已修复，Alpine 上 >5 MB 文件在源合成库删除后恢复原文/关系及通知状态。
+- 未部署；真实邮箱/手机、生产备份与离机完整应用恢复、连续运行验收仍待完成；最新 CI 与审查状态以本次 PR 为准。
+- 证据：[PR #4](https://github.com/HeiYingQWQ/sc-mail/pull/4)、[CI 配置](../.github/workflows/ci.yml)、[备份文件验收](../scripts/verify-backup-postgres.mjs)、[运维步骤](OPERATIONS.md#p0-隔离恢复及完整回归)。
