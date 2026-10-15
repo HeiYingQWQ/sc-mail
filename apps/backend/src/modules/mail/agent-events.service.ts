@@ -200,11 +200,11 @@ export class AgentEventsService {
         throw new ConflictException({ code: notificationRequiredCode, message: 'This event requires at least one allowlisted notification request' });
       }
       if (notifications.length && !['REALTIME', 'REVIEW'].includes(event.notificationPolicy)) throw new ConflictException({ code: 'NOTIFICATION_POLICY_BLOCKED', policy: event.notificationPolicy });
-      const allowedChannels = this.config.get<string>('NOTIFICATION_ALLOWED_CHANNELS', 'telegram').split(',').map((x) => x.trim()).filter(Boolean);
+      const allowedChannels = this.config.get<string>('NOTIFICATION_ALLOWED_CHANNELS', 'whatsapp').split(',').map((x) => x.trim()).filter(Boolean);
       const allowedRecipients = this.config.get<string>('NOTIFICATION_ALLOWED_RECIPIENTS', '').split(',').map((x) => x.trim()).filter(Boolean);
       const created = [];
       for (const item of notifications) {
-        if (!allowedChannels.includes(item.channel) || !allowedRecipients.includes(item.recipientRef)) throw new ConflictException({ code: 'NOTIFICATION_TARGET_NOT_ALLOWED' });
+        if (item.channel !== 'whatsapp' || !allowedChannels.includes(item.channel) || !allowedRecipients.includes(item.recipientRef)) throw new ConflictException({ code: 'NOTIFICATION_TARGET_NOT_ALLOWED' });
         const requestHash = this.hash({ ...item, eventId: id });
         const found = await tx.notificationDelivery.findUnique({ where: { requestKey: item.requestKey } });
         if (found) {
@@ -243,6 +243,7 @@ export class AgentEventsService {
     return value.map((entry) => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new BadRequestException('Invalid notification');
       const item = entry as Record<string, unknown>; this.rejectExtra(item, ['requestKey', 'channel', 'recipientRef', 'content']);
+      if (item.channel !== 'whatsapp') throw new BadRequestException({ code: 'NOTIFICATION_CHANNEL_UNSUPPORTED', message: 'Only WhatsApp notifications are supported' });
       return { requestKey: this.text(item.requestKey, 'requestKey', 200), channel: this.text(item.channel, 'channel', 40), recipientRef: this.text(item.recipientRef, 'recipientRef', 200), content: this.text(item.content, 'content', 4000) };
     });
   }

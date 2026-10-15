@@ -26,9 +26,9 @@ worker 对 AGENT_EVENT_WEBHOOK_URL 发送 POST，AGENT_WEBHOOK_TOKEN 为 Bearer�
 
 ## OpenClaw WhatsApp 与通知
 
-手机消息进入 OpenClaw 原生 WhatsApp，再调用 MCP，不经过 Ai Mail Telegram poller，也不代表同步客户 WhatsApp 历史。本机安装步骤统一见 [教程](AGENT_INTEGRATION.md)，Linux 同机私网见 [部署 Skill](../skills/sc-mail-openclaw-deploy/SKILL.md)。
+手机消息进入 OpenClaw 原生 WhatsApp，再调用 MCP，也不代表同步客户 WhatsApp 历史。本机安装步骤统一见 [教程](AGENT_INTEGRATION.md)，Linux 同机私网见 [部署 Skill](../skills/sc-mail-openclaw-deploy/SKILL.md)。
 
-NotificationDelivery 支持 Telegram 和可选 OpenClaw WhatsApp sender。WhatsApp 需要 OPENCLAW_WHATSAPP_NOTIFY_URL、AGENT_WEBHOOK_TOKEN、允许渠道与精确 E.164 收件人。relay ai-mail-notify 只有 session_status，不具备邮件/业务 MCP。事件 Agent 的通知请求由服务端策略、allowlist 和 requestKey 校验；正文规则见 [发件规则](MAIL_PROCESSING.md#发件规则与通知)。
+NotificationDelivery 仅支持 OpenClaw WhatsApp sender。WhatsApp 需要 OPENCLAW_WHATSAPP_NOTIFY_URL、AGENT_WEBHOOK_TOKEN、允许渠道与精确 E.164 收件人。relay ai-mail-notify 只有 session_status，不具备邮件/业务 MCP。事件 Agent 的通知请求由服务端策略、allowlist 和 requestKey 校验；正文规则见 [发件规则](MAIL_PROCESSING.md#发件规则与通知)。
 
 只在 OpenClaw 明确报告完成且渠道接受时标 delivered；providerDeliveryId 记录 hook runId，非 WhatsApp 消息 ID。结果不明标 unknown 禁止自动重发；delivered 不表示用户已读。更改 Skill/提示不会重放已完成旧事件。
 
@@ -44,17 +44,9 @@ node scripts/recover-missed-actionable-event.cjs --event-id <id> --operation-id 
 
 需 DATABASE_URL、构建 dist 与 Prisma Client。脚本不扫描或重放其他事件；恢复后看通知记录，不假定投递。队列全部终态后可 POST `/api/v1/mail/agent-events/review-summary`，body 为 operationId，幂等建立 BACKLOG_REVIEW_SUMMARY；有 pending/processing 会拒绝，payload 只有计数不含正文。
 
-## 可选 Telegram 桥接
+## WhatsApp 升级注意事项
 
-启用聊天需 TELEGRAM_BOT_TOKEN、精确 TELEGRAM_ALLOWED_CHAT_IDS/USER_IDS、AGENT_CHAT_WEBHOOK_URL 及独立 webhook token，缺项不长轮询。worker 存 update 与唯一游标，再发聊天回调：
-
-```json
-{"protocol":"ai-mail.agent.v1","type":"telegram_message","updateId":"123","idempotencyKey":"telegram:123","user":{"id":"..."},"chat":{"id":"..."},"message":{"id":"...","text":"...","untrusted":true},"apiBaseUrl":"https://mail.example/api/v1"}
-```
-
-Agent 接收器响应 text，worker 回复原会话。接收器按 Idempotency-Key 去重并检查用户业务授权。回复结果不明为 unknown，不自动重发；处理终态会话 30 天后清理。
-
-Telegram long poll/chat processor 假设单 worker，多副本前必须加 leader/advisory lock。主动通知另需允许 channel=telegram、精确 chat ID。确定性 429/5xx 有界退避；成功保存 Telegram message ID。不要把 bot token 放参数、Skill 或日志。
+Telegram 通知、轮询及聊天回调已移除。旧安装移除 TELEGRAM_BOT_TOKEN、TELEGRAM_ALLOWED_CHAT_IDS/USER_IDS、AGENT_CHAT_WEBHOOK_URL，设置 NOTIFICATION_ALLOWED_CHANNELS=whatsapp（空字符串关闭通知）。不自动迁移收件人：WhatsApp 仍需精确 E.164 allowlist、relay URL 与 webhook token。旧 channel=telegram 会被拒绝；历史表和投递记录保留但不消费，不重发或转投。集成状态不再返回 telegram / telegramSenderConfigured。
 
 ## 日报
 
@@ -76,11 +68,22 @@ GET `/api/v1/mail/sync/deletion/legacy-audit` 是维护只读入口，不向 CLI
 
 原始 MIME、CRM、事件及队列都在 PostgreSQL 卷。`pnpm backup -- <输出路径>` 创建 custom-format 全库备份，默认 backups/ai-mail-时间.dump；保密备份及 .env，并保留受控离机副本。
 
-`pnpm verify:backup-restore` 在 Compose PostgreSQL 建唯一临时库，将源 pg_dump 流式恢复并比对表/迁移/邮件/事件数量，只删除脚本创建的临时库，不覆盖应用库。可用 pg_restore --list 检查文件。演练只验证结构和关键行数，不等于完整应用恢复。
+备份默认总时限 15 分钟、每 5 秒报告阶段/累计处理字节/耗时；BACKUP_TIMEOUT_MS 与 BACKUP_PROGRESS_MS 可设正整数毫秒。失败、取消或超时不会发布完成文件，已有备份拒绝覆盖。
+
+恢复必须提供可信的已保存 custom-format 文件；不再从在线库重新 dump。先核实目标是隔离 PostgreSQL，再执行：
+
+```powershell
+$env:BACKUP_RESTORE_ALLOW_LOCAL_DB_CREATE = '1'
+pnpm verify:backup-restore -- backups/your-saved-file.dump
+```
+
+脚本检查 PGDMP/TOC，计算文件 SHA-256，将原文件恢复到随机 aimail_restore_check_* 空库，核对迁移和邮件/CRM/任务/事件/通知表可读并输出计数。成功或失败均清理该临时库；清理另有 30 秒预算，清理失败或创建结果不明会报告唯一库名以便核查，不删除应用库。进度字节为各读取阶段累计值，不是百分比。恢复不启动 worker、不连接 IMAP、不投递通知；必须另外验收密钥、完整应用、离机介质和 RPO/RTO。
+
+默认使用当前 Compose 的 postgres；BACKUP_PG_MODE=container 加 BACKUP_PG_CONTAINER 可选显式容器，CI 仅使用其 PostgreSQL 17 服务。native 模式使用本机 pg 工具和 loopback DATABASE_URL（可设 BACKUP_PG_BIN）；连接密码仅经环境传递。恢复工具有建库权限，不能恢复不可信来源的 dump。
 
 ### Windows Docker Desktop 流式备份停滞时的替代方法
 
-当前 `scripts/backup.mjs` 与 `scripts/verify-backup-restore.mjs` 没有总时限和进度报告，Docker/PowerShell 调用可能无限等待。若长时间无进度，取消后记为未完成，partial 文件不是有效备份。可在同一 Compose 项目根目录把 dump 先写到 PostgreSQL 容器内，再用 Docker CLI 复制到受保护的本机 `backups` 目录。命令使用容器内的现有 `POSTGRES_USER` / `POSTGRES_DB`，不会在本机 shell、参数或输出中展开数据库凭据：
+脚本已提供限时和进度。若 Docker 传输仍异常，失败应记为未完成，partial 文件不是有效备份。可在同一 Compose 项目根目录把 dump 先写到 PostgreSQL 容器内，再用 Docker CLI 复制到受保护的本机 `backups` 目录。命令使用容器内的现有 `POSTGRES_USER` / `POSTGRES_DB`，不会在本机 shell、参数或输出中展开数据库凭据：
 
 ```powershell
 $backupName = 'ai-mail-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
@@ -109,7 +112,7 @@ docker compose exec -T postgres rm -f $containerDump
 if ($LASTEXITCODE -ne 0) { throw 'Container temporary dump cleanup failed.' }
 ```
 
-这是一组分步示例，不代表每行都已作为整体演练。检查目标文件大小、容器内 `pg_restore --list` 和两端 SHA-256 一致后，可记录备份文件和复制完整性检查通过；这仍不能证明文件可恢复。恢复演练需另行在唯一隔离数据库运行 `pnpm verify:backup-restore`，不得对生产库执行恢复。复用此示例时，目标文件或容器内临时路径已存在就换一个新名称，并同步修改命令中的对应路径；不要覆盖已留存备份。无需在本机安装 PostgreSQL 客户端。
+这是一组分步示例，不代表每行都已作为整体演练。检查目标文件大小、容器内 `pg_restore --list` 和两端 SHA-256 一致后，可记录备份文件和复制完整性检查通过；这仍不能证明文件可恢复。恢复演练需另行在唯一隔离数据库运行 `pnpm verify:backup-restore -- <已保存备份文件>`，不得对生产库执行恢复。复用此示例时，目标文件或容器内临时路径已存在就换一个新名称，并同步修改命令中的对应路径；不要覆盖已留存备份。无需在本机安装 PostgreSQL 客户端。
 
 
 灾难恢复先停应用、保留损坏卷副本，在隔离空库恢复并验收后再切换。Docker CLI 必须可用，Windows 可用 DOCKER_BIN 指定 docker.exe。停止 Compose 保留数据，不执行 down -v。
@@ -207,3 +210,11 @@ node scripts/run-ui-crm-acceptance.cjs
 ```
 
 浏览器入口为 `http://127.0.0.1:3001/dashboard/`，凭据按 fixture 本地输出使用；不要将输出提交。进程退出时清理它创建的隔离库。CLI/HTTP suite 用 `pnpm verify:crm-cli-http`。如需复现 CI 的 fixture，使用工作流的 `UI_CRM_RUN_CLI_SUITE=1` 设置。
+
+### P0 隔离恢复及完整回归
+
+CI 增加同步恢复、分流租约、规则/Schema/任务、系统发件人、完整合成集成与备份故障回归。集成入口为 INTEGRATION_ALLOW_LOCAL_DB_CREATE=1 pnpm verify:integration-local；模型与渠道均 mock。pnpm verify:backup 不连接数据库，验证覆盖保护、超时、失败清理和输入拒绝。
+
+pnpm verify:backup-postgres 要求 DATABASE_URL 指向独立本机 sc_mail_ci 和 BACKUP_RESTORE_ALLOW_LOCAL_DB_CREATE=1。它创建合成源库、保存/复制文件、删除源库，再恢复原文件并核对 MIME、CRM/任务来源、通知 unknown 状态；损坏文件须失败，临时库/文件自动清理。
+
+本机可用 docker compose -p sc-mail-p0-tests -f scripts/fixtures/p0-postgres.yml up -d --wait 创建专用 PostgreSQL 17（127.0.0.1:55439，tmpfs，无生产卷）。将 COMPOSE_FILE 设为该文件绝对路径，COMPOSE_PROJECT_NAME=sc-mail-p0-tests，DATABASE_URL=postgresql://postgres:isolated-test-only@127.0.0.1:55439/sc_mail_ci。测试完成用相同 -p/-f 执行 down。该口令仅用于合成可丢弃实例；不得复用到生产。完整应用/外部渠道灾难恢复仍另行验收。

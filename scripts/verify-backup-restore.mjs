@@ -1,60 +1,62 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { open } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { randomUUID, createHash } from 'node:crypto';
+import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { operation, postgresRunner } from './backup-runtime.mjs';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const localDocker = process.env.LOCALAPPDATA ? resolve(process.env.LOCALAPPDATA, 'Programs/DockerDesktop/resources/bin/docker.exe') : '';
-const docker = process.env.DOCKER_BIN || (localDocker && process.platform === 'win32' ? localDocker : 'docker');
-const restoreDb = `aimail_restore_check_${Date.now()}`;
-let created = false;
-
-function quoteShell(value) { return `'${value.replaceAll("'", "'\\''")}'`; }
-
-function run(args) {
-  return new Promise((resolveRun, reject) => {
-    const child = spawn(docker, ['compose', ...args], { cwd: root, stdio: ['ignore', 'pipe', 'inherit'] });
-    let output = '';
-    child.stdout.setEncoding('utf8'); child.stdout.on('data', (chunk) => { output += chunk; });
-    child.once('error', reject);
-    child.once('close', (code) => code === 0 ? resolveRun(output.trim()) : reject(new Error(`docker compose exited with ${code}`)));
-  });
-}
-
-function runCopy(command, db, stdin = 'ignore') {
-  return spawn(docker, ['compose', 'exec', '-T', '-e', `RESTORE_DB=${db}`, 'postgres', 'sh', '-lc', command], { cwd: root, stdio: [stdin, 'pipe', 'inherit'] });
-}
-
-async function pipeDumpToRestore() {
-  const dump = runCopy('pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"', restoreDb);
-  const restore = runCopy('pg_restore --no-owner --no-privileges -U "$POSTGRES_USER" -d "$RESTORE_DB"', restoreDb, 'pipe');
-  const dumpDone = new Promise((resolveDone, reject) => { dump.once('error', reject); dump.once('close', (code) => code === 0 ? resolveDone() : reject(new Error(`pg_dump exited with ${code}`))); });
-  const restoreDone = new Promise((resolveDone, reject) => { restore.once('error', reject); restore.once('close', (code) => code === 0 ? resolveDone() : reject(new Error(`pg_restore exited with ${code}`))); });
-  try { await Promise.all([pipeline(dump.stdout, restore.stdin), dumpDone, restoreDone]); }
-  catch (error) { dump.kill(); restore.kill(); throw error; }
-}
-
-async function counts(db) {
-  const sql = `SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema='public'), (SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL), (SELECT count(*) FROM "EmailMessage"), (SELECT count(*) FROM "AgentEvent")`;
-  const output = await run(['exec', '-T', '-e', `RESTORE_DB=${restoreDb}`, 'postgres', 'sh', '-lc', `psql -U "$POSTGRES_USER" -d "$${db === 'source' ? 'POSTGRES_DB' : 'RESTORE_DB'}" -A -t -F ',' -c ${quoteShell(sql)}`]);
-  return output.split(',').map(Number);
-}
-
-try {
-  await run(['exec', '-T', '-e', `RESTORE_DB=${restoreDb}`, 'postgres', 'sh', '-lc', 'createdb -U "$POSTGRES_USER" "$RESTORE_DB"']);
-  created = true;
-  const sourceCounts = await counts('source');
-  await pipeDumpToRestore();
-  const restoredCounts = await counts('restore');
-  if (sourceCounts.some((value, index) => value !== restoredCounts[index]) || restoredCounts[1] < 1) throw new Error(`Restore verification mismatch: source=${sourceCounts.join(',')} restored=${restoredCounts.join(',')}`);
-  process.stdout.write(`Backup/restore drill passed in disposable database ${restoreDb}; tables/migrations/mail/events=${restoredCounts.join('/')}.\n`);
-} catch (error) {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exitCode = 1;
-} finally {
-  if (created) {
-    try { await run(['exec', '-T', '-e', `RESTORE_DB=${restoreDb}`, 'postgres', 'sh', '-lc', 'dropdb -U "$POSTGRES_USER" "$RESTORE_DB"']); }
-    catch (error) { process.stderr.write(`Could not drop disposable restore database ${restoreDb}: ${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1; }
+export async function verifyBackup(file, options = {}) {
+  if (!file) throw new Error('A saved custom-format backup file is required');
+  if (process.env.BACKUP_RESTORE_ALLOW_LOCAL_DB_CREATE !== '1') throw new Error('Set BACKUP_RESTORE_ALLOW_LOCAL_DB_CREATE=1 to authorize a disposable database');
+  const database = `aimail_restore_check_${randomUUID().replaceAll('-', '')}`;
+  const run = options.run || postgresRunner();
+  const op = operation('restore', options);
+  let handle, created = false;
+  try {
+    handle = await open(resolve(file), 'r');
+    const stat = await handle.stat();
+    const magic = Buffer.alloc(5); await handle.read(magic, 0, 5, 0);
+    if (!stat.isFile() || magic.toString() !== 'PGDMP') throw new Error('Expected a PostgreSQL custom-format backup');
+    const stream = () => handle.createReadStream({ start: 0, autoClose: false });
+    op.phase('hashing saved file');
+    const hash = createHash('sha256');
+    await pipeline(stream(), op.meter(), new Writable({ write(chunk, _encoding, done) { hash.update(chunk); done(); } }), { signal: op.signal });
+    const sha256 = hash.digest('hex');
+    op.phase('checking archive');
+    await run('pg_restore', ['--list'], { input: stream(), output: new Writable({ write(_chunk, _encoding, done) { done(); } }), op });
+    op.phase('creating isolated database');
+    try { await run('createdb', ['--template=template0', database], { op }); created = true; }
+    catch { throw new Error(`Database creation failed or outcome unknown; inspect only ${database}`); }
+    op.phase('restoring saved file');
+    await run('pg_restore', ['--exit-on-error', '--single-transaction', '--no-owner', '--no-privileges', '--dbname', database], { database, input: stream(), op });
+    op.phase('checking restored application tables');
+    const sql = `SELECT json_build_object('migrations', (SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL), 'mail', (SELECT count(*) FROM "EmailMessage"), 'rawMail', (SELECT count(*) FROM "EmailMessage" WHERE "rawSource" IS NOT NULL), 'contacts', (SELECT count(*) FROM "Contact"), 'projects', (SELECT count(*) FROM "Project"), 'tasks', (SELECT count(*) FROM "Task"), 'events', (SELECT count(*) FROM "AgentEvent"), 'notifications', (SELECT count(*) FROM "NotificationDelivery"))`;
+    const counts = JSON.parse(await run('psql', ['-X', '--set=ON_ERROR_STOP=1', '-At', '-c', sql], { database, op }));
+    if (!counts.migrations || Object.values(counts).some(value => !Number.isSafeInteger(value) || value < 0)) throw new Error('Invalid restored application schema');
+    if (options.validate) await options.validate({ database, run, op, counts });
+    const after = await handle.stat();
+    if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs) throw new Error('Backup file changed during verification');
+    op.phase('verification complete');
+    return { sha256, bytes: stat.size, counts };
+  } finally {
+    op.close();
+    await handle?.close();
+    if (created) {
+      const cleanup = operation('restore cleanup', { timeoutMs: 30000 });
+      try { await run('dropdb', ['--force', database], { op: cleanup }); }
+      catch { throw new Error(`Cleanup failed; remove only disposable database ${database}`); }
+      finally { cleanup.close(); }
+    }
   }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  const args = process.argv.slice(2).filter(arg => arg !== '--');
+  try {
+    if (args.length !== 1) throw new Error('Usage: pnpm verify:backup-restore -- <saved.dump>');
+    const report = await verifyBackup(args[0]);
+    process.stdout.write(`${JSON.stringify(report)}\nSaved-file restore verified; application/channel disaster recovery remains a separate acceptance.\n`);
+  } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
 }

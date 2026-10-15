@@ -11,6 +11,6 @@ const child = spawn(docker, ['compose', 'run', '--rm', '--no-deps', '-T',
   '--volume', `${resolve(root, 'dist')}:/app/dist:ro`,
   '--volume', `${resolve(root, 'scripts')}:/app/scripts:ro`,
   '--volume', `${resolve(root, 'prisma')}:/app/prisma:ro`,
-  '--entrypoint', 'node', 'backend', '/app/scripts/run-acceptance.cjs'], { cwd: root, stdio: 'inherit' });
+  '-e', 'INTEGRATION_ALLOW_LOCAL_DB_CREATE=1', '--entrypoint', 'node', 'backend', '/app/scripts/run-acceptance.cjs'], { cwd: root, stdio: 'inherit' });
 child.on('error', () => { console.error('Could not start Docker acceptance container'); process.exitCode = 1; });
 child.on('exit', (code) => { process.exitCode = code ?? 1; });

@@ -14,7 +14,7 @@ const { OpenAIResponsesProvider } = require(process.cwd() + '/dist/modules/ai/op
   const reconciliation = await get('/api/v1/mail/reconciliation/status'); results.reconciliation = { status: reconciliation.checkpoint?.status, lastErrorCode: reconciliation.checkpoint?.lastErrorCode };
   for (const path of ['tasks','requirements','decisions','projects','crm/contacts','crm/companies','reviews']) results[path] = { total: (await get(`/api/v1/mail/${path}`)).total };
   const brief = await get('/api/v1/mail/brief?date=today'); results.brief = { timezone: brief.timezone, total: brief.total, truncated: brief.truncated };
-  const integration = await get('/api/v1/mail/integrations/status'); results.integrations = { eventWakeup: integration.eventWakeup.configured, telegram: integration.telegram.configured, pollingEnabled: integration.telegram.pollingEnabled };
+  const integration = await get('/api/v1/mail/integrations/status'); results.integrations = { eventWakeup: integration.eventWakeup.configured, whatsapp: integration.notifications.whatsappSenderConfigured };
   console.log(JSON.stringify({ liveReadChecks: results }));
   if (process.env.LIVE_LEGACY_AUDIT === 'true') {
     const audit = await get('/api/v1/mail/sync/deletion/legacy-audit', 180000);

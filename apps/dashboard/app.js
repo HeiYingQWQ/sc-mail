@@ -22,16 +22,16 @@
     folders: '邮箱文件夹', mailbox: '文件夹', uidValidity: '文件夹版本', lastUid: '同步到 UID', fromDate: '起始日期', throughDate: '截止日期',
     lastPolledAt: '最近轮询', lastSuccessfulSyncAt: '最近同步成功', lastErrorCode: '最近错误代码', reconciliationRequired: '需要对账',
     scannedCount: '已扫描', importedCount: '已导入', completedAt: '完成时间', updatedAt: '更新时间',
-    eventWakeup: 'Agent 事件唤醒', notifications: '通知投递', telegram: 'Telegram 桥接', dailyBrief: '业务日报',
-    whatsappSenderConfigured: 'WhatsApp 通知已配置', telegramSenderConfigured: 'Telegram 通知已配置', chatBridgeConfigured: '聊天桥接已配置',
-    pollingEnabled: 'Telegram 轮询已启用', allowedChatsConfigured: '允许的聊天已配置', inbox: '聊天消息队列', deliveries: '投递记录',
+    eventWakeup: 'Agent 事件唤醒', notifications: '通知投递', dailyBrief: '业务日报',
+    whatsappSenderConfigured: 'WhatsApp 通知已配置',
+    deliveries: '投递记录',
     allowedChannels: '启用的通知渠道', timezone: '业务时区', language: '日报语言', style: '日报样式', time: '执行时间',
     waitingThresholdDays: '客户等待阈值（天）', followUpWindowDays: '跟进窗口（天）', notifyWhenEmpty: '无内容时也通知',
     checkpoint: '对账检查点', auditFrom: '本轮检查起始', auditThrough: '本轮检查截止', lastAuditStartedAt: '最近开始对账',
     lastAuditCompletedAt: '最近完成对账', processingRecordsCreated: '补建处理记录', crmRepaired: '修复 CRM 关联',
     needsReviewCount: '需人工复核', leaseActive: '正在处理', _count: '数量', _all: '总数',
   };
-  const SETTING_VALUES = { telegram: 'Telegram', whatsapp: 'WhatsApp', 'zh-CN': '简体中文', concise: '简洁', detailed: '详细',
+  const SETTING_VALUES = { whatsapp: 'WhatsApp', 'zh-CN': '简体中文', concise: '简洁', detailed: '详细',
     implicit: '隐式 TLS', starttls: 'STARTTLS', matched: '已匹配', completed: '已完成', running: '运行中',
     failed: '失败', idle: '空闲', not_started: '尚未开始', reconciling: '对账中' };
   const state = {

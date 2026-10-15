@@ -64,13 +64,9 @@ const envSchema = Joi.object({
   AI_TIMEOUT_MS: Joi.number().integer().min(1000).max(60000).default(20000),
   AI_RETRY_COUNT: Joi.number().integer().min(0).max(2).default(1),
   AI_CONTEXT_MAX_CHARS: Joi.number().integer().min(4000).max(32000).default(18000),
-  TELEGRAM_BOT_TOKEN: Joi.string().min(20).allow('').optional(),
-  TELEGRAM_ALLOWED_CHAT_IDS: Joi.string().pattern(/^-?\d+(,-?\d+)*$/).allow('').default(''),
-  TELEGRAM_ALLOWED_USER_IDS: Joi.string().pattern(/^\d+(,\d+)*$/).allow('').default(''),
-  NOTIFICATION_ALLOWED_CHANNELS: Joi.string().default('telegram'),
+  NOTIFICATION_ALLOWED_CHANNELS: Joi.string().valid('whatsapp', '').default('whatsapp'),
   NOTIFICATION_ALLOWED_RECIPIENTS: Joi.string().allow('').default(''),
   AGENT_EVENT_WEBHOOK_URL: Joi.string().allow('').optional().custom((value: string, helpers) => validateWebhookUrl(value, helpers), 'secure agent webhook URL'),
-  AGENT_CHAT_WEBHOOK_URL: Joi.string().allow('').optional().custom((value: string, helpers) => validateWebhookUrl(value, helpers), 'secure agent webhook URL'),
   OPENCLAW_WHATSAPP_NOTIFY_URL: Joi.string().allow('').optional().custom((value: string, helpers) => validateWebhookUrl(value, helpers), 'secure OpenClaw notification URL'),
   AGENT_WEBHOOK_TOKEN: Joi.string().min(24).allow('').optional(),
   AI_MAIL_PUBLIC_API_URL: Joi.string().uri({ scheme: ['https', 'http'] }).default('http://localhost:3000/api/v1'),
@@ -89,7 +85,7 @@ const envSchema = Joi.object({
   DASHBOARD_INITIAL_PASSWORD: Joi.string().min(6).allow('').optional(),
   DASHBOARD_SECURE_COOKIE: Joi.boolean().default(false),
 }).custom((value: Record<string, unknown>, helpers) => {
-  const agentWebhookConfigured = Boolean(value.AGENT_EVENT_WEBHOOK_URL || value.AGENT_CHAT_WEBHOOK_URL || value.OPENCLAW_WHATSAPP_NOTIFY_URL);
+  const agentWebhookConfigured = Boolean(value.AGENT_EVENT_WEBHOOK_URL || value.OPENCLAW_WHATSAPP_NOTIFY_URL);
   if (agentWebhookConfigured && !value.AGENT_WEBHOOK_TOKEN) {
     return helpers.error('any.custom', { message: 'AGENT_WEBHOOK_TOKEN is required when an Agent webhook URL is configured' });
   }

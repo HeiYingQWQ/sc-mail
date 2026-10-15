@@ -28,7 +28,6 @@ jobs:
       OPENAI_API_KEY: ''
       OPENAI_BASE_URL: ''
       AGENT_EVENT_WEBHOOK_URL: ''
-      TELEGRAM_BOT_TOKEN: ''
       OPENCLAW_WHATSAPP_NOTIFY_URL: ''
       NOTIFICATION_ALLOWED_CHANNELS: ''
       NOTIFICATION_ALLOWED_RECIPIENTS: ''
@@ -83,9 +82,20 @@ jobs:
           pnpm verify:contact-resolver
           pnpm verify:project-review
           pnpm verify:project-analysis-evidence
+          pnpm verify:normalizer
+          pnpm verify:business-gate
+          pnpm verify:sync-cursor
+          pnpm verify:sync-recovery
+          pnpm verify:triage-lease
+          pnpm verify:ai-analysis
+          pnpm verify:importance-triage
+          pnpm verify:task-state
+          pnpm verify:backup
+          pnpm verify:whatsapp
 
       - name: Run isolated CRM and project-analysis PostgreSQL regressions
         env:
+          INTEGRATION_ALLOW_LOCAL_DB_CREATE: '1'
           CRM_DELETE_ALLOW_LOCAL_DB_CREATE: '1'
           MANUAL_CRM_ALLOW_LOCAL_DB_CREATE: '1'
           PROJECT_ANALYSIS_ALLOW_LOCAL_DB_CREATE: '1'
@@ -93,7 +103,17 @@ jobs:
           UI_CRM_RUN_CLI_SUITE: '1'
           PORT: '3001'
         run: |
+          pnpm verify:integration-local
+          pnpm verify:system-mail-senders
           pnpm verify:crm-delete
           pnpm verify:manual-crm
           pnpm verify:project-analysis
           node scripts/ui-crm-acceptance.cjs
+
+      - name: Restore a saved backup in isolated PostgreSQL
+        env:
+          BACKUP_PG_MODE: container
+          BACKUP_PG_CONTAINER: ${{ job.services.postgres.id }}
+          BACKUP_RESTORE_ALLOW_LOCAL_DB_CREATE: '1'
+          BACKUP_TIMEOUT_MS: '120000'
+        run: pnpm verify:backup-postgres
