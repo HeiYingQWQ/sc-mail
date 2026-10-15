@@ -118,4 +118,4 @@ V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代�
 - 验证：构建/类型检查、Dashboard 63/63、工具契约 83 次、完整隔离 PostgreSQL 集成 53/53；修正模拟通知到期时间竞态，未改业务投递逻辑。
 - 合成浏览器桌面/390px 检查筛选、来源、取消与单条重新排队；实际生成 1 条重试审计、0 条通知，局部页面无横向溢出；新增可选恢复 fixture，回归沿用 CI。
 - 无 API/Schema/迁移变化，未部署、未接生产邮箱或真实通知；Agent/通知恢复、全页面移动端及真实故障演练仍待独立验收。
-- 证据：[Dashboard 回归](../scripts/verify-dashboard.cjs)、[合成 fixture](../scripts/ui-crm-acceptance.cjs)、[恢复操作说明](OPERATIONS.md#dashboard-恢复与人工复核)。
+- 证据：[PR #6](https://github.com/HeiYingQWQ/sc-mail/pull/6)、[Dashboard 回归](../scripts/verify-dashboard.cjs)、[合成 fixture](../scripts/ui-crm-acceptance.cjs)、[恢复操作说明](OPERATIONS.md#dashboard-恢复与人工复核)。
