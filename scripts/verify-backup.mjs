@@ -29,7 +29,7 @@ try {
     const messages = []; const saved = process.stderr.write;
     process.stderr.write = text => { messages.push(String(text)); return true; };
     try {
-      await assert.rejects(backup(join(dir, 'timeout.dump'), { timeoutMs: 60, progressMs: 10, run: async (_t, _a, { op }) => new Promise((_, reject) => op.signal.addEventListener('abort', () => reject(new Error('timeout')), { once: true })) }));
+      await assert.rejects(backup(join(dir, 'timeout.dump'), { timeoutMs: 500, progressMs: 10, run: async (_t, _a, { op }) => new Promise((_, reject) => op.signal.addEventListener('abort', () => reject(new Error('timeout')), { once: true })) }));
     } finally { process.stderr.write = saved; }
     assert.ok(messages.length >= 2); assert.ok(messages.some(value => value.includes('bytes')));
     assert.deepEqual(await readdir(dir), ['saved.dump']);
@@ -68,6 +68,7 @@ try {
     let dropped = false;
     await assert.rejects(verifyBackup(join(dir, 'saved.dump'), { timeoutMs: 60, progressMs: 20, run: async (tool, args, { input, op }) => {
       if (input) for await (const _ of input) { /* consume */ }
+      op.signal.throwIfAborted();
       if (tool === 'pg_restore' && args.includes('--dbname')) await new Promise((_, reject) => op.signal.addEventListener('abort', () => reject(new Error('restore timeout')), { once: true }));
       if (tool === 'dropdb') { assert.equal(op.signal.aborted, false); dropped = true; }
     } }), /restore timeout/);

@@ -103,4 +103,4 @@ V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代�
 - 本地验证：构建/类型检查、契约 83 次、Dashboard 51、修复 19、同步恢复 18、租约 9、合成集成 53；CRM/项目分析/系统发件人及 CLI→HTTP 33 项通过。
 - 备份故障 9 项、WhatsApp 模拟传输 8 项通过；已验证复制的实际 dump 在源合成库删除后恢复 MIME、CRM/任务关联与 unknown 通知状态。
 - 未部署；真实邮箱/手机、生产备份与离机完整应用恢复、连续运行验收仍待完成；最新 CI 与审查状态以本次 PR 为准。
-- 证据：[CI 配置](../.github/workflows/ci.yml)、[备份文件验收](../scripts/verify-backup-postgres.mjs)、[运维步骤](OPERATIONS.md#p0-隔离恢复及完整回归)。
+- 证据：[PR #4](https://github.com/HeiYingQWQ/sc-mail/pull/4)、[CI 配置](../.github/workflows/ci.yml)、[备份文件验收](../scripts/verify-backup-postgres.mjs)、[运维步骤](OPERATIONS.md#p0-隔离恢复及完整回归)。

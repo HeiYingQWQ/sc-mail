@@ -56,9 +56,12 @@ try {
   await writeFile(corrupt, saved.subarray(0, saved.length - 100));
   await assert.rejects(verifyBackup(corrupt));
   // Exercise a real process deadline after CREATE DATABASE, then bounded cleanup.
-  await assert.rejects(verifyBackup(copied, { timeoutMs: 5000, progressMs: 1000, validate: async ({ database: restored, run, op }) => {
+  let reachedSlowQuery = false;
+  await assert.rejects(verifyBackup(copied, { timeoutMs: 10000, progressMs: 1000, validate: async ({ database: restored, run, op }) => {
+    reachedSlowQuery = true;
     await run('psql', ['-X', '-At', '-c', 'SELECT pg_sleep(30)'], { database: restored, op });
   } }));
+  assert.equal(reachedSlowQuery, true, 'Deadline test must reach a real PostgreSQL query');
   const leftovers = await admin.$queryRawUnsafe("SELECT datname FROM pg_database WHERE datname LIKE 'aimail_restore_check_%'");
   assert.deepEqual(leftovers, []);
   console.log('Saved-file PostgreSQL restore passed: copied archive, removed source, exact MIME/CRM/task relations, unknown notification preserved, corrupt archive rejected, temporary databases removed.');
