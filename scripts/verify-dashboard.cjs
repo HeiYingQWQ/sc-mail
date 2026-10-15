@@ -981,6 +981,32 @@ test('in-flight duplicate retry submits once and late completion cannot replace 
   assert.equal(h.app.content.textContent, before); assert.equal(h.app.state.page, 'companies');
 });
 
+for (const status of [200, 401]) test(`retry response ${status} from an old session cannot affect a new login`, async () => {
+  const pending = deferred();
+  const h = recoveryHarness((url, options) => {
+    if (url.endsWith('/retry') && options.method === 'POST') return pending.promise;
+    if (url.endsWith('/auth/login')) return response({ user: { id: 'new-session', mustChangePassword: false } });
+  });
+  await h.app.loadPage('audit'); await fire(button(recoveryPanel(h), '重新判断此邮件'));
+  const write = fire(button(confirmationPanel(h), '确认重新排队')); await flush();
+  await fire(h.get('#logout'));
+  h.get('#email').value = 'synthetic@session.invalid'; h.get('#password').value = 'synthetic-only';
+  await fire(h.get('#login-form'), 'submit'); await h.app.loadPage('companies');
+  assert.equal(h.app.state.user.id, 'new-session');
+  const before = h.app.content.textContent, logouts = h.requests.filter(r => r.url.endsWith('/auth/logout')).length;
+  pending.resolve(response(status === 401 ? { message: 'Old session expired' } : { status: 'pending' }, status)); await write;
+  assert.equal(h.app.state.user.id, 'new-session'); assert.equal(h.app.content.textContent, before);
+  assert.equal(h.get('#login').classList.contains('hidden'), true);
+  assert.equal(h.requests.filter(r => r.url.endsWith('/auth/logout')).length, logouts, 'old response must not revoke the new cookie session');
+});
+
+test('retry unauthorized response in the current session still returns to login', async () => {
+  const h = recoveryHarness((url, options) => url.endsWith('/retry') && options.method === 'POST' ? response({}, 401) : undefined);
+  await h.app.loadPage('audit'); await fire(button(recoveryPanel(h), '重新判断此邮件')); await fire(button(confirmationPanel(h), '确认重新排队'));
+  assert.equal(h.app.state.user, null); assert.equal(h.get('#login').classList.contains('hidden'), false);
+  assert.equal(h.requests.filter(r => r.url.endsWith('/auth/logout')).length, 1);
+});
+
 test('recovery status filter resets offset and ignores a stale response', async () => {
   const late = deferred(); let statusReads = 0;
   const h = recoveryHarness((url) => {

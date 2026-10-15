@@ -202,6 +202,7 @@
   }
   function query(values) { const params = new URLSearchParams(); for (const [key, value] of Object.entries(values)) if (value !== undefined && value !== null && value !== '') params.set(key, value); return params.toString(); }
   async function api(path, options = {}) {
+    const session = sessionSequence;
     const headers = new Headers(options.headers || {});
     if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     let response;
@@ -212,7 +213,7 @@
     }
     const type = response.headers.get('content-type') || '';
     const body = type.includes('json') ? await response.json() : await response.text();
-    if (options.signal?.aborted) { const error = new Error('请求已取消'); error.name = 'AbortError'; throw error; }
+    if (options.signal?.aborted || session !== sessionSequence) { const error = new Error('请求已取消'); error.name = 'AbortError'; throw error; }
     if (!response.ok) {
       if (response.status === 401) logout();
       throw new Error(formatApiError(body, response.status));

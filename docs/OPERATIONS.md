@@ -223,7 +223,7 @@ node scripts/run-ui-crm-acceptance.cjs
 
 浏览器入口为 `http://127.0.0.1:3001/dashboard/`，凭据按 fixture 本地输出使用；不要将输出提交。进程退出时清理它创建的隔离库。CLI/HTTP suite 用 `pnpm verify:crm-cli-http`。如需复现 CI 的 fixture，使用工作流的 `UI_CRM_RUN_CLI_SUITE=1` 设置。
 
-恢复/复核界面验收可在启动前额外设置 `$env:UI_CRM_RECOVERY_FIXTURES='1'`、`$env:UI_CRM_RUN_CLI_SUITE='0'`；添加两条合成重要性记录和两条复核，不运行重要性 worker，通知允许列表为空。检查筛选/刷新、来源阅读、取消确认不写入、单条确认后排队及桌面/窄屏文案；不能把排队视为处理成功。自动化 `pnpm verify:dashboard` 覆盖失联重试、并发与迟到响应、错误/空态、未知原因和不可信文本，沿用现有 CI 执行。
+恢复/复核界面验收可在启动前额外设置 `$env:UI_CRM_RECOVERY_FIXTURES='1'`、`$env:UI_CRM_RUN_CLI_SUITE='0'`；添加两条合成重要性记录和两条复核，不运行重要性 worker，通知允许列表为空。检查筛选/刷新、来源阅读、取消确认不写入、单条确认后排队及桌面/窄屏文案；不能把排队视为处理成功。自动化 `pnpm verify:dashboard` 覆盖失联重试、并发与迟到响应、跨会话 401、错误/空态、未知原因和不可信文本，沿用现有 CI 执行。
 
 ### P0 隔离恢复及完整回归
 
