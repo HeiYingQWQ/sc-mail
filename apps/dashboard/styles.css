@@ -435,12 +435,45 @@
 .recovery-record h3, .review-reason-cell { overflow-wrap: anywhere; }
 .recovery-record > p, .review-explanation, .review-next-step { max-width: 70ch; line-height: 1.65; overflow-wrap: anywhere; }
 .recovery-record .action-row { margin-top: 12px; }
+.page-content, #dialog-content, .section-head > *, .detail-meta > div { min-width: 0; max-width: 100%; }
+.content, .detail-dialog, .notice { overflow-wrap: anywhere; }
+.table-wrap { width: 100%; min-width: 0; max-width: 100%; overscroll-behavior-inline: contain; }
+.table-wrap:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.data-table { min-width: 640px; }
+.data-table td { white-space: normal; overflow-wrap: anywhere; min-width: 100px; max-width: 360px; }
+.data-table .cell-title { min-width: 220px; }
+.entity-picker, .toolbar > *, .action-row > *, .form-actions > * { min-width: 0; max-width: 100%; }
+.entity-picker select { width: 100%; min-width: 0; max-width: 100%; }
+.picker-controls, .picker-search { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.picker-search input { min-width: 0; max-width: 100%; }
+.brand-logo { max-width: 100%; }
+.button:disabled { cursor: default; opacity: .6; transform: none; }
+.inline-confirmation { flex-basis: 100%; }
+.inline-confirmation p { margin-bottom: 10px; }
+.inline-confirmation .button + .button { margin-inline-start: 8px; }
+.request-status { flex-basis: 100%; padding: 10px 0; margin: 8px 0; font-size: 14px; line-height: 1.6; color: #526477; }
 .technical-details { margin: 12px 0; max-width: 100%; }
 .technical-details summary { cursor: pointer; font-size: 14px; color: #526477; }
 .technical-details summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
 .technical-details .json-block { max-width: 100%; overflow: auto; }
 .review-evidence { padding: 8px 0; line-height: 1.65; overflow-wrap: anywhere; }
 @media (max-width: 680px) {
+  .sidebar #navigation { overflow-x: auto; overflow-y: hidden; }
+  .topbar { gap: 12px; }
+  .top-actions { flex: none; }
+  .section-head { flex-wrap: wrap; align-items: flex-start; }
+  .section-head p, .section-title p, .notice-inline, .small-text, .list-main p, .detail-meta { font-size: 14px; }
+  .list-main strong, .detail-meta span, .form-grid label { font-size: 14px; }
+  .data-table, .data-table th { font-size: 14px; }
+  .button, .button.small, .nav-item, .project-header-actions .button, .logout { min-height: 44px; font-size: 14px; }
+  .toolbar input, .toolbar select, .entity-picker select, .inline-select, .picker-search input { min-height: 44px; font-size: 16px; max-width: 100%; }
+  .detail-dialog:not(.project-detail-dialog) .detail-meta { grid-template-columns: minmax(0, 1fr); }
+  .form-actions, .pagination { flex-wrap: wrap; }
+  .pagination { justify-content: flex-start; font-size: 14px; }
+  .dialog-close { width: 44px; height: 44px; }
+  .detail-dialog h2 { margin-inline-end: 48px; }
+  .list-row { flex-wrap: wrap; }
+  .list-main { flex-basis: 180px; }
   .recovery-panel .toolbar { align-items: stretch; }
   .recovery-panel .toolbar select { width: 100%; }
   .recovery-record .action-row { flex-wrap: wrap; }

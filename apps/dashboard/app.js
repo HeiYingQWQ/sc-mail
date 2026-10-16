@@ -55,7 +55,7 @@
   const analysisWrites = new Set();
   const appliedSuggestions = new Map();
 
-  function requestScope() {
+  function requestScope(statusRoot) {
     const controller = new AbortController();
     const check = () => {
       if (controller.signal.aborted) { const error = new Error('请求已取消'); error.name = 'AbortError'; throw error; }
@@ -66,9 +66,17 @@
       async api(path, options = {}) {
         check();
         const readOnly = !options.method || options.method.toUpperCase() === 'GET';
-        const result = await api(path, readOnly ? { ...options, signal: controller.signal } : options);
-        check();
-        return result;
+        const status = el('p', 'request-status'); status.setAttribute('role', 'status');
+        const slowTimer = statusRoot && setTimeout(() => {
+          if (controller.signal.aborted) return;
+          status.textContent = readOnly ? '读取较慢，正在等待服务响应；可切换页面或关闭详情取消读取。' : '服务仍在响应，请勿重复提交；超时不代表操作未保存。';
+          statusRoot.append(status);
+        }, 5000);
+        try {
+          const result = await api(path, readOnly ? { ...options, signal: controller.signal } : options);
+          check();
+          return result;
+        } finally { clearTimeout(slowTimer); status.remove(); }
       },
     };
   }
@@ -102,11 +110,13 @@
     const confirmation = el('div', `notice-inline inline-confirmation ${kind}`);
     confirmation.setAttribute('role', 'group'); confirmation.setAttribute('aria-label', ariaLabel);
     const confirmAction = button(confirmLabel, async () => {
-      confirmAction.disabled = true;
+      if (confirmAction.disabled) return;
+      confirmAction.disabled = true; cancelAction.disabled = true;
       try { await onConfirm(); confirmation.remove(); }
-      catch { confirmAction.disabled = false; }
+      catch { confirmAction.disabled = false; cancelAction.disabled = false; }
     }, 'button primary small');
-    append(confirmation, el('p', '', message), button('取消', () => confirmation.remove(), 'button ghost small'), confirmAction);
+    const cancelAction = button('取消', () => { if (!cancelAction.disabled) confirmation.remove(); }, 'button ghost small');
+    append(confirmation, el('p', '', message), cancelAction, confirmAction);
     container.append(confirmation); confirmAction.focus();
     return confirmation;
   }
@@ -126,7 +136,7 @@
     const more = button('加载更多', () => load(retryReset), 'button secondary small');
     const controls = el('div', 'picker-controls'); append(controls, status, more); append(root, select, controls);
     let offset = 0; let total = 0; let term = ''; let sequence = 0; let loading = false; let retryReset = true;
-    const seen = new Set();
+    const seen = new Set(); const known = new Map();
     select.addEventListener('change', () => onChange(select.value));
     async function load(reset) {
       const current = ++sequence; const nextOffset = reset ? 0 : offset;
@@ -137,10 +147,10 @@
         if (current !== sequence) return;
         const items = data[key];
         if (!Array.isArray(items)) throw new Error('列表返回格式无效');
-        if (reset) { select.replaceChildren(); select.append(optionSelect([['', emptyLabel]], '').firstElementChild); seen.clear(); }
+        if (reset) { select.replaceChildren(); select.append(optionSelect([['', emptyLabel]], '').firstElementChild); seen.clear(); known.clear(); }
         for (const item of items) {
           if (!filter(item) || seen.has(item.id)) continue;
-          seen.add(item.id); const option = el('option', '', label(item)); option.value = item.id; select.append(option);
+          seen.add(item.id); known.set(item.id, item); const option = el('option', '', label(item)); option.value = item.id; select.append(option);
         }
         offset = nextOffset + items.length; total = data.total ?? offset;
         if (!items.length && offset < total) throw new Error('列表分页未返回记录，请重试');
@@ -164,7 +174,7 @@
       append(searchBox, input, button('搜索', runSearch, 'button secondary small')); root.prepend(searchBox);
       input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); runSearch(); } });
     }
-    return { element: root, select, ready: load(true), get loading() { return loading; } };
+    return { element: root, select, known, ready: load(true), get loading() { return loading; } };
   }
   const companyPicker = (emptyLabel = '不关联公司') => ({ path: '/mail/crm/companies', key: 'companies', label: company => company.name, emptyLabel });
   function pageIntro(title, description, action, root = content) {
@@ -205,18 +215,48 @@
       .filter(Boolean).join(' · ') || '—';
   }
   function query(values) { const params = new URLSearchParams(); for (const [key, value] of Object.entries(values)) if (value !== undefined && value !== null && value !== '') params.set(key, value); return params.toString(); }
+  async function fetchBody(path, options) {
+    const readOnly = !options.method || ['GET', 'HEAD'].includes(options.method.toUpperCase());
+    const controller = new AbortController();
+    const abortError = () => { const error = new Error('请求已取消'); error.name = 'AbortError'; return error; };
+    if (options.signal?.aborted) throw abortError();
+    let interrupt;
+    const interrupted = new Promise((_, reject) => { interrupt = reject; });
+    const cancel = () => { controller.abort(); interrupt(abortError()); };
+    options.signal?.addEventListener('abort', cancel, { once: true });
+    const timer = setTimeout(() => {
+      controller.abort();
+      const error = new Error(readOnly ? '读取超时，请检查网络后重试。' : '等待响应超时，操作可能已经保存。请先刷新核对，不要重复提交；如操作带有编号，重试时应复用原编号。');
+      error.code = 'REQUEST_TIMEOUT'; interrupt(error);
+    }, readOnly ? 30000 : 120000);
+    try {
+      return await Promise.race([interrupted, (async () => {
+        const response = await fetch(`${API}${path}`, { ...options, signal: controller.signal, credentials: 'include' });
+        const type = response.headers.get('content-type') || '';
+        const body = type.includes('json') ? await response.json() : await response.text();
+        return { response, body };
+      })()]);
+    } catch (error) {
+      if (error instanceof TypeError) {
+        const networkError = new Error(readOnly ? '无法连接到 SC Mail 服务，请检查服务状态和网络后重试。' : '连接中断，操作结果未确认。请先刷新核对，重试时保留原操作编号。');
+        networkError.code = 'NETWORK_ERROR'; throw networkError;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer); options.signal?.removeEventListener('abort', cancel);
+    }
+  }
   async function api(path, options = {}) {
     const session = sessionSequence;
     const headers = new Headers(options.headers || {});
     if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-    let response;
-    try { response = await fetch(`${API}${path}`, { ...options, headers, credentials: 'include' }); }
+    let result;
+    try { result = await fetchBody(path, { ...options, headers }); }
     catch (error) {
-      if (error instanceof TypeError) throw new Error('无法连接到 SC Mail 服务，请检查服务状态和网络后重试。');
+      if (options.signal?.aborted || session !== sessionSequence) { const cancelled = new Error('请求已取消'); cancelled.name = 'AbortError'; throw cancelled; }
       throw error;
     }
-    const type = response.headers.get('content-type') || '';
-    const body = type.includes('json') ? await response.json() : await response.text();
+    const { response, body } = result;
     if (options.signal?.aborted || session !== sessionSequence) { const error = new Error('请求已取消'); error.name = 'AbortError'; throw error; }
     if (!response.ok) {
       if (response.status === 401) logout();
@@ -227,11 +267,7 @@
   async function authApi(path, options = {}) {
     const headers = new Headers(options.headers || {});
     if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-    let response;
-    try { response = await fetch(`${API}${path}`, { ...options, headers, credentials: 'include' }); }
-    catch (error) { const networkError = new Error('无法连接到 SC Mail 服务，请检查服务状态和网络后重试。'); networkError.code = 'NETWORK_ERROR'; throw networkError; }
-    const type = response.headers.get('content-type') || '';
-    const body = type.includes('json') ? await response.json() : await response.text();
+    const { response, body } = await fetchBody(path, { ...options, headers });
     if (!response.ok) { const error = new Error(formatApiError(body, response.status)); error.status = response.status; throw error; }
     return body;
   }
@@ -303,11 +339,16 @@
     card.replaceChildren(el('p', 'auth-title', 'SC Mail Console'), el('p', '', error?.message || '无法恢复登录状态。'), button('重试连接', restoreSession, 'button primary small'));
     $('#auth-loading').classList.remove('hidden'); $('#login').classList.add('hidden'); $('#app').classList.add('hidden');
   }
-  function showError(error) { content.replaceChildren(el('div', 'card empty', error?.message || '加载失败')); }
+  function showError(error) {
+    const panel = el('div', 'card empty'); panel.setAttribute('role', 'status');
+    append(panel, el('p', '', error?.message || '加载失败'), button('重新读取', () => loadPage(state.page), 'button secondary'));
+    content.replaceChildren(panel);
+  }
   function empty(message) { return el('div', 'empty', message); }
   function table(headers, rows, renderRow, { click } = {}) {
     if (!rows?.length) return empty('暂无记录');
     const wrap = el('div', 'table-wrap'); const tbl = el('table', 'data-table'); const thead = el('thead'); const hr = el('tr');
+    wrap.setAttribute('tabindex', '0'); wrap.setAttribute('role', 'region'); wrap.setAttribute('aria-label', `${headers.join('、')}；窄屏可横向滚动`);
     headers.forEach(value => hr.append(el('th', '', value))); thead.append(hr); const tbody = el('tbody');
     rows.forEach((row, index) => {
       const tr = el('tr', click ? 'clickable' : ''); if (click) tr.addEventListener('click', event => { if (!event.target.closest('button,select,a,summary,details')) click(row, index); });
@@ -325,9 +366,10 @@
   function showDialog(title, subtitle = '') {
     clearTimeout(projectAnalysisTimer); projectAnalysisTimer = null;
     dialogRequest?.abort();
+    dialogBusy = false;
     dialog.classList.remove('project-detail-dialog');
     dialog.dataset.activeProjectTab = '';
-    dialogRequest = requestScope();
+    dialogRequest = requestScope(dialogContent);
     dialogContent.replaceChildren(); append(dialogContent, el('p', 'eyebrow', subtitle), el('h2', '', title));
     if (!dialog.open) dialog.showModal();
     return dialogRequest;
@@ -694,7 +736,7 @@
   async function loadPage(page = state.page) {
     if (state.user?.mustChangePassword && page !== 'account') page = 'account';
     pageRequest?.abort();
-    const request = requestScope(); pageRequest = request;
+    const request = requestScope(content); pageRequest = request;
     const panel = el('div', 'page-content');
     updateNavigation(page); $('#notice').classList.add('hidden'); setLoading();
     try {
@@ -2019,36 +2061,39 @@
       if (message?.id) dialogContent.append(sourceEmailButton(message.id, sourceUnavailable || review.isSourceDeleted, '查看源邮件'));
       if (review.status !== 'pending') { dialogContent.append(el('p', 'small-text', `处理人：${review.resolvedBy || '—'} · ${formatDate(review.resolvedAt)}`)); return; }
       const actions = el('div', 'action-row'); const operationIds = new Map(); let resolving = false;
+      const feedback = el('p', 'error'); feedback.setAttribute('role', 'alert');
       const operationFor = (action, extra) => { const key = JSON.stringify([action, extra]); if (!operationIds.has(key)) operationIds.set(key, crypto.randomUUID()); return operationIds.get(key); };
-      const resolve = async (action, extra = {}, confirmed = false) => {
-        if (resolving) return;
+      const resolve = async (action, extra = {}, confirmed = false, projectName = '') => {
+        if (resolving || !request.active) return;
         if (!confirmed) {
           const message = action === 'merge_contact'
             ? '合并会转移来源联系人的邮箱和邮件关联，并保留审计记录。此操作没有一键撤销。'
             : action === 'dismiss' ? '忽略后会将这条复核记录标记为已处理。'
-              : '该操作会更新邮件或 CRM 事实并记录审计来源。';
+              : action === 'assign_project' ? `将这封邮件归入“${projectName}”并记录人工决定？请先核对来源；不会重新开启已结束项目。`
+                : '该操作会更新邮件或 CRM 事实并记录审计来源。';
           const label = action === 'merge_contact' ? '确认合并联系人' : action === 'dismiss' ? '确认忽略' : '确认并保存';
-          requestInlineConfirmation(actions, message, label, () => resolve(action, extra, true), 'review-action-confirmation', '确认复核操作');
+          requestInlineConfirmation(actions, message, label, () => resolve(action, extra, true, projectName), 'review-action-confirmation', '确认复核操作');
           return;
         }
-        resolving = true; dialogBusy = true; const controls = [...actions.querySelectorAll('button, select')]; controls.forEach(control => { control.disabled = true; });
-        try { await api(`/mail/reviews/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify({ action, actorId: 'dashboard-user', operationId: operationFor(action, extra), ...extra }) }); dialogBusy = false; closeDialog(); await loadPage('reviews'); showNotice('复核已处理'); }
-        catch (error) { showNotice(error.message, true); }
-        finally { resolving = false; dialogBusy = false; if (dialog.open) controls.forEach(control => { control.disabled = false; }); }
+        resolving = true; dialogBusy = true; feedback.textContent = ''; const controls = [...actions.querySelectorAll('button, select')]; controls.forEach(control => { control.disabled = true; });
+        try { await request.api(`/mail/reviews/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify({ action, actorId: 'dashboard-user', operationId: operationFor(action, extra), ...extra }) }); dialogBusy = false; closeDialog(); await loadPage('reviews'); showNotice('复核已处理'); }
+        catch (error) { if (request.active) feedback.textContent = error.message; throw error; }
+        finally { if (request.active) { resolving = false; dialogBusy = false; controls.forEach(control => { control.disabled = false; }); } }
       };
       const assignAnalysisReview = async projectId => {
+        if (resolving || !request.active) return;
         if (!message?.id || sourceUnavailable || assignmentMessage?.projectManualOverride) {
           showNotice(sourceUnavailable ? '来源邮件已删除或不可读取，无法更改归属。' : '这封邮件已被人工锁定，请刷新后查看最新复核状态。', true); return;
         }
         if (!Number.isInteger(assignmentMessage?.projectAssignmentVersion)) {
           showNotice('服务端未返回邮件归属版本，无法安全更新。请刷新复核后重试。', true); return;
         }
-        resolving = true; dialogBusy = true; const controls = [...actions.querySelectorAll('button, select')]; controls.forEach(control => { control.disabled = true; });
+        resolving = true; dialogBusy = true; feedback.textContent = ''; const controls = [...actions.querySelectorAll('button, select')]; controls.forEach(control => { control.disabled = true; });
         try {
           await request.api(`/mail/messages/by-id/${encodeURIComponent(message.id)}/project`, { method: 'PATCH', body: JSON.stringify({ projectId: projectId?.id ?? null, expectedVersion: assignmentMessage.projectAssignmentVersion, operationId: operationFor('project_assignment', projectId?.id ?? null) }) });
           dialogBusy = false; closeDialog(); await loadPage('reviews'); showNotice('项目归属已人工确认并锁定。');
-        } catch (error) { showNotice(error.message, true); }
-        finally { resolving = false; dialogBusy = false; if (dialog.open) controls.forEach(control => { control.disabled = false; }); }
+        } catch (error) { if (request.active) feedback.textContent = error.message; throw error; }
+        finally { if (request.active) { resolving = false; dialogBusy = false; controls.forEach(control => { control.disabled = false; }); } }
       };
       const confirmAnalysisAssignment = project => {
         const choice = project ? `归入“${project.name}”` : '确认为非项目邮件';
@@ -2072,6 +2117,7 @@
         if (analysisReview) {
           const projectPicker = pagedSelect({ path: '/mail/projects', key: 'projects', label: project => `${project.name}${project.company?.name ? ` · ${project.company.name}` : ''}${project.status === 'completed' ? ' · 已结束' : ''}`, emptyLabel: '选择已有项目', request });
           actions.append(projectPicker.element, button('分配到所选项目', () => {
+            if (projectPicker.loading) return;
             const selected = projectPicker.known.get(projectPicker.select.value);
             if (!selected) { showNotice('请选择一个已有项目。', true); return; }
             confirmAnalysisAssignment({ id: selected.id, name: selected.name });
@@ -2081,8 +2127,10 @@
         } else {
           const projectPicker = pagedSelect({ path: '/mail/projects', key: 'projects', label: project => `${project.name}${project.company?.name ? ` · ${project.company.name}` : ''}`, emptyLabel: '选择项目', request });
           actions.append(projectPicker.element, button('分配到项目', () => {
-            if (!projectPicker.select.value) { showNotice('请选择目标项目。', true); return; }
-            resolve('assign_project', { projectId: projectPicker.select.value });
+            if (projectPicker.loading) return;
+            const selected = projectPicker.known.get(projectPicker.select.value);
+            if (!selected) { showNotice('请选择目标项目。', true); return; }
+            resolve('assign_project', { projectId: selected.id }, false, selected.name);
           }, 'button primary small'));
           actions.append(button('新建项目并分配', () => projectEditor(null, undefined, (payload, operationId) => api(`/mail/reviews/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify({ action: 'create_project', projectName: payload.name, companyId: payload.companyId, description: payload.description, contactIds: payload.contactIds, primaryContactId: payload.primaryContactId, status: payload.status, stage: payload.stage, actorId: 'dashboard-user', operationId }) })), 'button secondary small'));
         }
@@ -2095,8 +2143,8 @@
           resolve('assign_topic', { topicId: topicSelect.value });
         }, 'button primary small'), button('新建 Topic 并分配', () => createTopicDialog(message.projectId, id), 'button secondary small'));
       }
-      dialogContent.append(el('h3', '', '处理操作'), actions);
-    } catch (error) { if (request.active) dialogContent.replaceChildren(el('p', 'error', error.message)); }
+      dialogContent.append(el('h3', '', '处理操作'), actions, feedback);
+    } catch (error) { if (request.active) dialogContent.replaceChildren(el('p', 'error', error.message), button('重新读取复核', () => openReview(id), 'button secondary')); }
   }
 
   document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => loadPage(item.dataset.page)));

@@ -847,6 +847,8 @@ async function main() {
       const event = await db.agentEvent.create({ data: {
         eventKey: `acceptance-actionable-${importance}`, eventType: 'INBOUND_EMAIL_RECEIVED',
         entityType: 'email_message', entityId: notificationSource.id, notificationPolicy: 'REALTIME',
+        // Already due: this case validates completion policy, not DB/Node clock alignment.
+        nextAttemptAt: new Date(0),
         payloadJson: { sourceMessageId: notificationSource.id, classification: 'BUSINESS_HUMAN', importance },
       } });
       const [claimed] = await events.claim(`acceptance-actionable-${importance}`, 1, 60, event.id);

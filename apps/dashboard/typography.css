@@ -46,6 +46,8 @@ h3 { font-size: 17px; }
   .sidebar-bottom > span { display: none; }
   .logout-label { display: inline; font-size: 14px; }
   .entity-picker { width: 100%; }
+  .entity-picker select { min-width: 0; }
+  .form-grid input,.form-grid select,.form-grid textarea,.toolbar input,.toolbar select,.picker-search input,.login-card input { font-size: 16px; min-height: 44px; }
   .section-head > .button { flex-shrink: 0; white-space: nowrap; }
 }
 
