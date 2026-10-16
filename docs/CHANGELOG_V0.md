@@ -127,4 +127,4 @@ V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代�
 - 验证：构建/完整类型检查、Dashboard 81/81、契约 83 次、隔离 PostgreSQL 完整集成 55/55；含真实 HTTP 的认证、跨邮箱拒绝、分页、CAS 与重放。
 - 合成浏览器桌面/390px 验证需求版本 1→2、人工保护、确认取消、单条 AI 需求应用与历史读取；1 次 fake 分析、1 条 AI 审计、2 条人工审计、0 条通知，决策提案未应用，局部无页面横向溢出。
 - 未合并、未部署、未操作生产邮箱或真实通知；真实模型/外部链路、全页面响应式及生产验收仍待完成，CI 与独立审核结论以本次 PR 最新 SHA 为准。
-- 证据：[Dashboard 回归](../scripts/verify-dashboard.cjs)、[HTTP/隔离集成](../scripts/acceptance.cjs)、[操作与复现](OPERATIONS.md#需求决策与-ai-建议操作)、[API 契约](API_REFERENCE.md#requirements-and-decisions)。
+- 证据：[PR #7](https://github.com/HeiYingQWQ/sc-mail/pull/7)、[Dashboard 回归](../scripts/verify-dashboard.cjs)、[HTTP/隔离集成](../scripts/acceptance.cjs)、[操作与复现](OPERATIONS.md#需求决策与-ai-建议操作)、[API 契约](API_REFERENCE.md#requirements-and-decisions)。
