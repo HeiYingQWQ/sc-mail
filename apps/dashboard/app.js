@@ -837,7 +837,7 @@
       if (selected) {
         const run = await request.api('/mail/analysis/' + encodeURIComponent(selected));
         if (run.sourceMessageId !== messageId) throw new Error('分析与当前来源不一致，请刷新。');
-        if (analysisRequests.get(messageId) === run.requestKey) { analysisRequests.delete(messageId); generate.textContent = '生成新的分析建议'; }
+        if (analysisRequests.get(messageId) === run.requestKey && run.status !== 'processing' && run.errorCode !== 'AI_ANALYSIS_INTERRUPTED') { analysisRequests.delete(messageId); generate.textContent = '生成新的分析建议'; }
         await renderMailSuggestions(dialogContent, run, message, request);
       } else dialogContent.append(el('p', 'empty', '这封邮件尚无分析记录。可在核对来源后显式发起。'));
     } catch (error) { if (request.active) dialogContent.replaceChildren(el('p', 'error', '建议读取失败：' + error.message), button('重试读取建议', () => openMessageAnalysis(messageId, offset, runId), 'button secondary')); }
@@ -847,7 +847,7 @@
     const result = run.resultJson || {}, allowed = run.status === 'completed' && run.validationStatus === 'valid' && run.schemaVersion === '3' && !run.errorCode;
     append(container, el('h3', '', '本次建议'), detailMeta([['分析状态', analysisStatus(run)], ['模型', run.model || '未提供'], ['完成时间', formatDate(run.completedAt)], ['业务校验', allowed ? '通过，仍须逐条确认' : '不可应用'] ]));
     if (run.errorCode) container.append(el('p', 'notice-inline', run.errorCode === 'AI_ANALYSIS_INTERRUPTED' ? '处理曾中断。可恢复原分析，或明确发起新一轮分析。' : '这轮分析失败，未产生可应用的完整建议。发起新分析会再次调用模型。'));
-    if (run.errorCode === 'AI_ANALYSIS_INTERRUPTED' && typeof run.requestKey === 'string') container.append(button('恢复这次中断分析', () => { analysisRequests.set(message.id, run.requestKey); openMessageAnalysis(message.id); }, 'button secondary small'));
+    if (run.errorCode === 'AI_ANALYSIS_INTERRUPTED' && typeof run.requestKey === 'string') container.append(button('恢复这次中断分析', () => { analysisRequests.set(message.id, run.requestKey); return openMessageAnalysis(message.id); }, 'button secondary small'));
     if (!allowed) container.append(el('p', 'notice-inline', '未完成、未通过校验、需要复核或旧版分析只能查看。请先核对来源与复核原因；不会自动应用。'));
     if (typeof result.summary === 'string') append(container, el('h3', '', '摘要建议（未保存为项目摘要）'), el('p', 'fact-description', result.summary));
     if (result.classification) container.append(detailMeta([['当前分类', CLASSIFICATIONS[message.classification] || message.classification], ['建议分类（未应用）', CLASSIFICATIONS[result.classification] || '未知分类']]));

@@ -1171,9 +1171,20 @@ test('completed AI generation reopens persisted results with a usable new-analys
 test('interrupted AI analysis exposes an explicit same-operation recovery before another model call', async () => {
   const writes = []; const run = sampleRun({ status: 'failed', errorCode: 'AI_ANALYSIS_INTERRUPTED', requestKey: 'original-analysis-operation' });
   const h = factsHarness((url, options) => url.endsWith('/analysis/run-1') ? response(run) : url.endsWith('/analysis') && options.method === 'POST' ? (writes.push(JSON.parse(options.body)), response(run)) : undefined);
-  await h.app.openMessageAnalysis('m1'); await fire(button(h.app.dialogContent, '恢复这次中断分析')); await flush();
+  await h.app.openMessageAnalysis('m1'); await fire(button(h.app.dialogContent, '恢复这次中断分析'));
+  await h.app.openMessageAnalysis('m1');
+  assert.equal(button(h.app.dialogContent, '重试未确认的分析').disabled, false);
   assert.equal(writes.length, 0); await fire(button(h.app.dialogContent, '重试未确认的分析')); await fire(button(h.app.dialogContent, '确认分析这封邮件'));
   assert.equal(writes[0].operationId, 'original-analysis-operation');
+});
+test('processing history cannot discard an uncertain analysis operation before retry', async () => {
+  const writes = []; const h = factsHarness((url, options) => {
+    if (url.endsWith('/analysis') && options.method === 'POST') { writes.push(JSON.parse(options.body)); throw new TypeError('response lost'); }
+    if (url.endsWith('/analysis/run-1')) return response(sampleRun({ status: 'processing', requestKey: writes[0]?.operationId || 'other-operation' }));
+  });
+  await h.app.openMessageAnalysis('m1'); await fire(button(h.app.dialogContent, '生成新的分析建议')); await fire(button(h.app.dialogContent, '确认分析这封邮件'));
+  await h.app.openMessageAnalysis('m1'); await fire(button(h.app.dialogContent, '重试未确认的分析')); await fire(button(h.app.dialogContent, '确认分析这封邮件'));
+  assert.equal(writes.length, 2); assert.equal(writes[1].operationId, writes[0].operationId);
 });
 test('AI apply blocks double clicks while a single write is pending', async () => {
   const late = deferred(); let writes = 0; const h = factsHarness(url => url.endsWith('/apply') ? (writes++, late.promise) : undefined);
