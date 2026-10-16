@@ -24,6 +24,12 @@ const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
 const REQUIREMENT_STATUSES = ['open', 'accepted', 'rejected'];
 const DECISION_STATUSES = ['proposed', 'accepted', 'rejected'];
 const FACT_RELATIONS = { project: { select: { id: true, name: true } }, topic: { select: { id: true, name: true } }, sourceMessage: { select: { id: true, subject: true } } } as const;
+function factAccountScope(accountId: string) {
+  return { OR: [
+    { sourceMessage: { mailAccountId: accountId } },
+    { sourceMessageId: null, OR: [{ project: { messages: { some: { mailAccountId: accountId } } } }, { project: { messages: { none: {} } } }, { projectId: null, topicId: null }] },
+  ] };
+}
 
 type MutationInput = {
   operationId: string;
@@ -132,7 +138,7 @@ export class BusinessRecordsService {
     const account = await this.account();
     const where: Prisma.RequirementWhereInput = {
       ...(projectId ? { projectId } : {}), ...(topicId ? { topicId } : {}),
-      OR: [{ sourceMessage: { mailAccountId: account.id } }, { project: { messages: { some: { mailAccountId: account.id } } } }, { project: { messages: { none: {} } } }, { projectId: null, topicId: null, sourceMessageId: null }],
+      ...factAccountScope(account.id),
     };
     const [total, requirements] = await this.prisma.$transaction([this.prisma.requirement.count({ where }), this.prisma.requirement.findMany({ where, include: FACT_RELATIONS, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: limit, skip: offset })]);
     return { total, offset, limit, requirements };
@@ -142,7 +148,7 @@ export class BusinessRecordsService {
     const account = await this.account();
     const where: Prisma.DecisionWhereInput = {
       ...(projectId ? { projectId } : {}), ...(topicId ? { topicId } : {}),
-      OR: [{ sourceMessage: { mailAccountId: account.id } }, { project: { messages: { some: { mailAccountId: account.id } } } }, { project: { messages: { none: {} } } }, { projectId: null, topicId: null, sourceMessageId: null }],
+      ...factAccountScope(account.id),
     };
     const [total, decisions] = await this.prisma.$transaction([this.prisma.decision.count({ where }), this.prisma.decision.findMany({ where, include: FACT_RELATIONS, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: limit, skip: offset })]);
     return { total, offset, limit, decisions };
@@ -162,13 +168,17 @@ export class BusinessRecordsService {
   }
 
   async getRequirement(id: string) {
-    const item = await this.requirementInAccount(id);
-    return this.prisma.requirement.findUniqueOrThrow({ where: { id: item.id }, include: FACT_RELATIONS });
+    const account = await this.account();
+    const item = await this.prisma.requirement.findFirst({ where: { id, ...factAccountScope(account.id) }, include: FACT_RELATIONS });
+    if (!item) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Requirement not found' });
+    return item;
   }
 
   async getDecision(id: string) {
-    const item = await this.decisionInAccount(id);
-    return this.prisma.decision.findUniqueOrThrow({ where: { id: item.id }, include: FACT_RELATIONS });
+    const account = await this.account();
+    const item = await this.prisma.decision.findFirst({ where: { id, ...factAccountScope(account.id) }, include: FACT_RELATIONS });
+    if (!item) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Decision not found' });
+    return item;
   }
 
   async updateRequirement(id: string, body: Record<string, unknown>) {
@@ -176,9 +186,9 @@ export class BusinessRecordsService {
     const expectedVersion = this.integer(body.expectedVersion, 'expectedVersion', 1, 2_147_483_647);
     const data = this.factUpdateData(body, 'requirement');
     const hashValue = { action: 'update', id, expectedVersion, data };
+    const current = await this.requirementInAccount(id);
     const replay = await this.replay(operationId, hashValue, 'requirement');
     if (replay) return replay;
-    const current = await this.requirementInAccount(id);
     if (current.version !== expectedVersion) throw new ConflictException({ code: 'VERSION_CONFLICT', currentVersion: current.version });
     return this.mutate({ operationId, actorId: 'api-token-client', entityType: 'requirement', entityId: id, action: 'update', sourceMessageId: null, before: current, after: data, hashValue }, async (tx) => {
       await this.lockScopeForWrite(tx, [{ projectId: current.projectId, topicId: current.topicId }, { projectId: Object.hasOwn(data, 'projectId') ? data.projectId as string | null : current.projectId, topicId: Object.hasOwn(data, 'topicId') ? data.topicId as string | null : current.topicId }]);
@@ -206,9 +216,9 @@ export class BusinessRecordsService {
     const expectedVersion = this.integer(body.expectedVersion, 'expectedVersion', 1, 2_147_483_647);
     const data = this.factUpdateData(body, 'decision');
     const hashValue = { action: 'update', id, expectedVersion, data };
+    const current = await this.decisionInAccount(id);
     const replay = await this.replay(operationId, hashValue, 'decision');
     if (replay) return replay;
-    const current = await this.decisionInAccount(id);
     if (current.version !== expectedVersion) throw new ConflictException({ code: 'VERSION_CONFLICT', currentVersion: current.version });
     return this.mutate({ operationId, actorId: 'api-token-client', entityType: 'decision', entityId: id, action: 'update', sourceMessageId: null, before: current, after: data, hashValue }, async (tx) => {
       await this.lockScopeForWrite(tx, [{ projectId: current.projectId, topicId: current.topicId }, { projectId: Object.hasOwn(data, 'projectId') ? data.projectId as string | null : current.projectId, topicId: Object.hasOwn(data, 'topicId') ? data.topicId as string | null : current.topicId }]);
@@ -606,14 +616,14 @@ export class BusinessRecordsService {
 
   private async requirementInAccount(id: string) {
     const account = await this.account();
-    const item = await this.prisma.requirement.findFirst({ where: { id, OR: [{ sourceMessage: { mailAccountId: account.id } }, { project: { messages: { some: { mailAccountId: account.id } } } }, { project: { messages: { none: {} } } }, { projectId: null, sourceMessageId: null }] } });
+    const item = await this.prisma.requirement.findFirst({ where: { id, ...factAccountScope(account.id) } });
     if (!item) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Requirement not found' });
     return item;
   }
 
   private async decisionInAccount(id: string) {
     const account = await this.account();
-    const item = await this.prisma.decision.findFirst({ where: { id, OR: [{ sourceMessage: { mailAccountId: account.id } }, { project: { messages: { some: { mailAccountId: account.id } } } }, { project: { messages: { none: {} } } }, { projectId: null, sourceMessageId: null }] } });
+    const item = await this.prisma.decision.findFirst({ where: { id, ...factAccountScope(account.id) } });
     if (!item) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Decision not found' });
     return item;
   }

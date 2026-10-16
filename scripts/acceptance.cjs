@@ -783,13 +783,27 @@ async function main() {
     assert.equal((await api('/analysis')).status, 400); assert.equal((await api('/analysis?messageId=' + source.id + '&limit=101')).status, 400);
     const foreign = await db.mailAccount.create({ data: { email: 'foreign-ui@acceptance.invalid', host: 'imap.foreign.invalid', port: 993, tlsMode: 'implicit', username: 'synthetic', passwordCiphertext: 'synthetic-only' } });
     const message = await db.emailMessage.create({ data: { mailAccountId: foreign.id, mailbox: 'INBOX', uidValidity: 1n, uid: 1, providerMessageId: 'foreign-ui', direction: 'inbound', fromJson: [], toJson: [], ccJson: [], bccJson: [], headersJson: {}, rawSource: Buffer.from('synthetic foreign mail') } });
+    const emptyProject = await db.project.create({ data: { name: 'Synthetic empty scope project' } });
     try {
       assert.equal((await api('/analysis?messageId=' + message.id)).status, 404);
       for (const kind of ['requirement', 'decision']) {
-        const fact = await db[kind].create({ data: { text: 'Foreign synthetic fact', sourceMessageId: message.id } });
-        assert.equal((await api('/' + kind + 's/' + fact.id)).status, 404); await db[kind].delete({ where: { id: fact.id } });
+        for (const projectId of [null, project.id, emptyProject.id]) {
+          const fact = await db[kind].create({ data: { text: 'Foreign synthetic fact', sourceMessageId: message.id, projectId } });
+          try {
+            assert.equal((await api('/' + kind + 's/' + fact.id)).status, 404);
+            assert.equal((await api('/' + kind + 's/' + fact.id, 'PATCH', { operationId: 'foreign-edit-' + fact.id, expectedVersion: 1, text: 'Must not write' })).status, 404);
+            const replayId = 'foreign-replay-' + fact.id;
+            await db.businessOperation.create({ data: { operationId: replayId, sourceOperationId: replayId, inputHash: records.hash({ action: 'update', id: fact.id, expectedVersion: 1, data: { text: 'Must not write' } }), entityType: kind, entityId: fact.id, action: 'update', actorId: 'api-token-client', afterJson: { id: fact.id } } });
+            assert.equal((await api('/' + kind + 's/' + fact.id, 'PATCH', { operationId: replayId, expectedVersion: 1, text: 'Must not write' })).status, 404);
+            const listing = await api('/' + kind + 's?limit=100');
+            assert.equal(listing.body[kind + 's'].some(item => item.id === fact.id), false);
+          } finally { await db.businessOperation.deleteMany({ where: { entityId: fact.id } }); await db[kind].delete({ where: { id: fact.id } }); }
+          const manual = await db[kind].create({ data: { text: 'Visible source-free fact', projectId } });
+          try { assert.equal((await api('/' + kind + 's/' + manual.id)).status, 200); }
+          finally { await db[kind].delete({ where: { id: manual.id } }); }
+        }
       }
-    } finally { await db.emailMessage.delete({ where: { id: message.id } }); await db.mailAccount.delete({ where: { id: foreign.id } }); }
+    } finally { await db.project.delete({ where: { id: emptyProject.id } }); await db.emailMessage.delete({ where: { id: message.id } }); await db.mailAccount.delete({ where: { id: foreign.id } }); }
   });
   await test('M10 summary versions, rollback and project stage audit', async () => {
     const first = await summaries.applyAnalysisSummary(analysis.id, { operationId: 'summary-one', entityType: 'project', entityId: project.id, expectedVersion: 0 });
