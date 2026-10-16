@@ -602,6 +602,13 @@ export class MailController {
     return this.analyzer.getRun(analysisRunId);
   }
 
+  @Get('analysis')
+  async listAnalysisRuns(@Query('messageId') messageId: string | undefined, @Query('limit') limit: string | undefined,
+    @Query('offset') offset: string | undefined, @Headers('authorization') authorization?: string) {
+    await this.authorize(authorization);
+    return this.analyzer.listRuns(messageId, this.parseInteger(limit, 20, 1, 100), this.parseInteger(offset, 0, 0, 100_000));
+  }
+
   @Post('analysis/:analysisRunId/apply')
   @HttpCode(200)
   async applyAnalysis(
@@ -689,6 +696,12 @@ export class MailController {
     return this.records.createRequirement(body);
   }
 
+  @Get('requirements/:requirementId')
+  async getRequirement(@Param('requirementId') id: string, @Headers('authorization') authorization?: string) {
+    await this.authorize(authorization);
+    return this.records.getRequirement(id);
+  }
+
   @Patch('requirements/:requirementId')
   async updateRequirement(@Param('requirementId') id: string, @Body() body: Record<string, unknown>, @Headers('authorization') authorization?: string) {
     await this.authorize(authorization);
@@ -710,6 +723,12 @@ export class MailController {
   async createDecision(@Body() body: Record<string, unknown>, @Headers('authorization') authorization?: string) {
     await this.authorize(authorization);
     return this.records.createDecision(body);
+  }
+
+  @Get('decisions/:decisionId')
+  async getDecision(@Param('decisionId') id: string, @Headers('authorization') authorization?: string) {
+    await this.authorize(authorization);
+    return this.records.getDecision(id);
   }
 
   @Patch('decisions/:decisionId')

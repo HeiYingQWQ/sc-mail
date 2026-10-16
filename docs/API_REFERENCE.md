@@ -136,8 +136,13 @@ Analysis schema **3** assigns every operation a `task_outcome`: `none`, `acknowl
 
 - `GET /api/v1/mail/requirements`, `POST /api/v1/mail/requirements`, `PATCH /api/v1/mail/requirements/<id>`
 - `GET /api/v1/mail/decisions`, `POST /api/v1/mail/decisions`, `PATCH /api/v1/mail/decisions/<id>`
+- `GET /api/v1/mail/requirements/<id>` and `GET /api/v1/mail/decisions/<id>` read a current, mailbox-scoped record with its version; detail and list responses include minimal project/Topic names and source message ID/subject. Missing or foreign source-backed records return 404. Source-deleted markers remain visible; no restore/delete capability is added.
+
+Fact lists, detail and update preflight require a source-backed record's message to belong to the configured mailbox, even when its project is shared with that mailbox or has no messages. Project visibility (current mailbox messages or an empty project), and unassociated manual facts, are fallbacks only for records with no source message. A project relationship does not grant access to another mailbox's email subject.
 
 Create takes `operationId`, `text`, optional `projectId` / `topicId`, and optional `sourceMessageId` when there is a real source. Patch takes `operationId`, `expectedVersion`, and `text` and/or `status`. Statuses are `open|accepted|rejected` for requirements and `proposed|accepted|rejected` for decisions. Manual updates increment the version and set `manualOverride`; later model suggestions cannot overwrite that decision. Every create/update stores a BusinessOperation receipt with request hash and before/after values. Reusing an idempotency key with different input returns `409`.
+
+Explicit user/API creates also set `manualOverride=true` immediately, including an initially accepted fact, so a later AI update cannot overwrite the user's original entry. AI operations created through the separate analysis-apply path retain their existing behavior; this change does not backfill older records.
 
 ### Apply analysis and promote campaign replies
 
@@ -184,6 +189,10 @@ GET /api/v1/mail/analysis/<analysis-run-id>
 ```
 
 The run is scoped to the configured mailbox. Provider failure returns a safe error code and `analysisRunId`; raw provider response bodies and credentials are not exposed.
+
+`GET /api/v1/mail/analysis?messageId=<id>&limit=20&offset=0` reads one imported message's persisted analysis history, newest first with a stable ID tie-breaker. `messageId` is required; limit is 1–100, offset 0–100000. The mailbox-scoped response is `{total,limit,offset,runs}`; rows contain ID/source ID, status, validation/schema version, model, safe error code and timestamps, excluding result bodies, input context, request keys and leases. Read a selected run through the existing detail endpoint; expired processing is normalized there. Reads never invoke the model. This supports Dashboard and generic CLI requests; no new named MCP tool or OpenClaw allowlist is introduced.
+
+Dashboard “AI 建议” lists audit candidates by supported scope, not all analyzed mail. Any source mail also opens its paginated analysis history. New model calls require inline confirmation; unresolved calls reuse their operation ID, interrupted runs can resume their original ID, and explicit new analyses get new IDs. Only completed, valid schema-3 Task/Requirement/Decision operations can be confirmed individually; each request submits one original `operationIndexes` entry, preserving per-operation replay after response loss. Failed/review/legacy runs, missing or manually protected targets and mismatched sources cannot be applied in the UI. The server still enforces freshness, evidence and manual protection. Summary/classification and Project/Topic proposals are displayed for review, not applied by this flow. Session-local success indicators are not a persisted applied-operation ledger; the server's BusinessOperation receipts provide durable idempotency.
 
 ### CLI and MCP
 

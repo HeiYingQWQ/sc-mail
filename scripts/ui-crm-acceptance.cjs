@@ -43,6 +43,7 @@ const { RealtimeSyncService } = load('realtime-sync.service');
 const { AuthService } = load('auth.service', 'auth');
 const { AuthController } = load('auth.controller', 'auth');
 const { PROJECT_ASSIGNMENT_PROMPT } = load('project-assignment.schema', 'ai');
+const { ANALYSIS_OUTPUT_SCHEMA } = load('analysis.schema', 'ai');
 
 const now = new Date();
 const databaseSuffix = randomBytes(4).toString('hex');
@@ -154,6 +155,15 @@ const provider = {
       return { summary: 'Synthetic project summary from validated source excerpts.', claims };
     }
 
+    if (process.env.UI_CRM_BUSINESS_FIXTURES === '1' && prompt.includes('\n\nAnalysis context (JSON):\n')) {
+      const context = JSON.parse(prompt.split('\n\nAnalysis context (JSON):\n')[1]);
+      const current = context.messages.find(message => message.id === context.current_message_id);
+      const evidence = excerpt(current.text || current.subject);
+      const blank = Object.fromEntries(Object.keys(ANALYSIS_OUTPUT_SCHEMA.properties.operations.items.properties.changes.properties).map(key => [key, null]));
+      return { schema_version: '3', classification: context.first_pass_classification.classification, classification_confidence: 0.95, classification_evidence: [evidence], summary: '合成分析摘要，尚未应用为项目摘要。',
+        operations: ['requirement', 'decision'].map(kind => ({ entity_type: kind, action: 'create', target_id: null, source_message_id: current.id, confidence: 0.95, evidence, task_outcome: 'none', changes: { ...blank, text: kind === 'requirement' ? '合成模型需求：请核对原文后再确认。' : '合成模型决策提案：尚未接受。', status: kind === 'requirement' ? 'open' : 'proposed' } })),
+        reply_required_suggestion: false, importance: 'normal', requires_deep_analysis: false, review_reasons: [] };
+    }
     // General dashboard analysis is not the focus of this fixture. Return a
     // schema-safe quiet result if another read-only screen requests it.
     return {
@@ -401,6 +411,11 @@ async function main() {
     });
     await seedDatabase();
     if (process.env.UI_CRM_RECOVERY_FIXTURES === '1') await seedRecoveryFixtures();
+    if (process.env.UI_CRM_BUSINESS_FIXTURES === '1') {
+      const message = await prisma.emailMessage.findFirstOrThrow({ where: { classification: 'BUSINESS_HUMAN', direction: 'inbound' }, orderBy: { receivedAt: 'desc' } });
+      await prisma.requirement.create({ data: { text: '合成需求：核对交付规格与原文证据。', sourceMessageId: message.id } });
+      await prisma.decision.create({ data: { text: '合成决策提案：尚未接受。', sourceMessageId: message.id } });
+    }
     if (stopping) return;
     const running = await makeApplication();
     app = running.httpApp;

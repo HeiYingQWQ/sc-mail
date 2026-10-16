@@ -6,6 +6,8 @@
 
 ## 1. 接入职责与凭据
 
+需求/决策详情和单邮件分析历史的 HTTP 读取复用现有认证，契约见 [API](API_REFERENCE.md#requirements-and-decisions)；可用已有通用 CLI request 查询，不新增 MCP 工具或 OpenClaw allowlist。Dashboard 只读查看、新模型分析、逐条应用是分别确认的动作，界面安装不改变宿主权限或生产配置。
+
 SC Mail 独立同步和保存事实，OpenClaw 承接手机对话、MCP 工具调用和事件处理；安装 Skill、MCP 接通、事件唤醒、主动投递分别配置。整体数据流见 [当前架构](../PROJECT_DEVELOPMENT.md#运行结构)，工具契约见 [Agent 接口](API_REFERENCE.md#通用查询与适配)。
 
 Dashboard 密码仅供登录；OpenClaw MCP 使用 API Token。setup.mjs 将根 .env 的 IMAP_API_TOKEN 复制为 openclaw-stack/.env 的 AI_MAIL_API_TOKEN，并生成独立 Gateway/hook 凭据。不要把密码与 Token 混用。

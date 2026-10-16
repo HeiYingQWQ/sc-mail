@@ -415,6 +415,22 @@
 }
 
 /* Recovery and review guidance reuse the existing Console typography and controls. */
+.fact-text, .fact-description { white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; line-height: 1.65; max-width: 70ch; }
+.fact-table .data-table { min-width: 780px; }
+.fact-table .fact-text { display: block; min-width: 240px; max-width: 380px; }
+.ai-operation { padding: 20px 0; border-top: 1px solid var(--line); }
+.ai-operation .detail-meta { margin: 12px 0; }
+.ai-operation .review-evidence { color: #526477; }
+.ai-operation h3 { margin-top: 0; }
+.ai-operation .button:disabled { opacity: .55; cursor: default; transform: none; }
+.sidebar #navigation { overflow-y: auto; min-height: 0; }
+@media (min-width: 901px) {
+  .nav-item[data-page="requirements"], .nav-item[data-page="decisions"], .nav-item[data-page="ai-suggestions"] { padding-inline-start: 39px; }
+}
+@media (max-width: 680px) {
+  .ai-operation .detail-meta { grid-template-columns: 1fr; }
+  #detail-dialog .action-row { flex-wrap: wrap; }
+}
 .recovery-record { padding: 20px 0; border-top: 1px solid var(--line); }
 .recovery-record h3, .review-reason-cell { overflow-wrap: anywhere; }
 .recovery-record > p, .review-explanation, .review-next-step { max-width: 70ch; line-height: 1.65; overflow-wrap: anywhere; }

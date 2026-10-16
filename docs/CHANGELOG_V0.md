@@ -119,3 +119,12 @@ V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代�
 - 合成浏览器桌面/390px 检查筛选、来源、取消与单条重新排队；实际生成 1 条重试审计、0 条通知，局部页面无横向溢出；新增可选恢复 fixture，回归沿用 CI。
 - 无 API/Schema/迁移变化，未部署、未接生产邮箱或真实通知；Agent/通知恢复、全页面移动端及真实故障演练仍待独立验收。
 - 证据：[PR #6](https://github.com/HeiYingQWQ/sc-mail/pull/6)、[Dashboard 回归](../scripts/verify-dashboard.cjs)、[合成 fixture](../scripts/ui-crm-acceptance.cjs)、[恢复操作说明](OPERATIONS.md#dashboard-恢复与人工复核)。
+
+## V0.9.9 · 需求、决策及 AI 建议界面（2026-10-16）
+- 新增需求/决策列表、项目筛选、分页、来源与最新详情，支持真实来源建档、正文/状态编辑及版本冲突保护；显式人工新建即标记人工保护，避免已接受事实被模型覆盖；项目概览改用实际 text。
+- 单邮件 AI 建议支持候选、持久历史、确认生成及中断恢复；逐条确认原始操作索引，复用稳定操作编号，保留模型校验、来源新鲜度和人工保护；摘要/分类/项目建议只展示。
+- 补齐事实详情和分析历史元数据 API；按独立审核收紧事实列表/详情/编辑：有来源优先校验邮箱，共享/空项目不能放行外邮箱来源；同步契约与接入，不增加 MCP 工具、权限、Schema 或迁移。
+- 验证：构建/完整类型检查、Dashboard 82/82、契约 83 次、隔离 PostgreSQL 完整集成 55/55；含真实 HTTP 认证、跨邮箱拒绝、分页、CAS 与重放；修复独立审核发现的中断恢复编号过早清除，补确定性回归。
+- 合成浏览器桌面/390px 验证需求版本 1→2、人工保护、确认取消、单条 AI 需求应用与历史读取；1 次 fake 分析、1 条 AI 审计、2 条人工审计、0 条通知，决策提案未应用，局部无页面横向溢出。
+- 未合并、未部署、未操作生产邮箱或真实通知；真实模型/外部链路、全页面响应式及生产验收仍待完成，CI 与独立审核结论以本次 PR 最新 SHA 为准。
+- 证据：[PR #7](https://github.com/HeiYingQWQ/sc-mail/pull/7)、[Dashboard 回归](../scripts/verify-dashboard.cjs)、[HTTP/隔离集成](../scripts/acceptance.cjs)、[操作与复现](OPERATIONS.md#需求决策与-ai-建议操作)、[API 契约](API_REFERENCE.md#requirements-and-decisions)。
