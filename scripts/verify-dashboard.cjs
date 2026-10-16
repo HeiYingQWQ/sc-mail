@@ -56,6 +56,7 @@ async function fire(node, event = 'click', extra = {}) {
   return emitted;
 }
 async function flush() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
+async function until(check) { for (let i = 0; i < 100; i++) { if (check()) return; await Promise.resolve(); } assert.ok(check(), 'UI did not reach the expected settled state'); }
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 function response(body, status = 200) { return { ok: status >= 200 && status < 300, status, headers: new Headers({ 'content-type': 'application/json' }), json: async () => body }; }
 
@@ -75,7 +76,7 @@ function harness(handler, authHandler) {
   };
   vm.createContext(context); vm.runInContext(source, context, { filename: 'app.js' });
   const app = context.testApp; app.state.user = { id: 'dashboard-test', mustChangePassword: false }; app.setTimezone('Asia/Tokyo');
-  return { app, get, requests, timers, confirmCalls: () => confirmCalls, async runTimer(delay) { const entry = [...timers.entries()].find(([, timer]) => timer.delay === delay); assert.ok(entry, `Expected timer after ${delay}ms`); timers.delete(entry[0]); await entry[1].callback(); await flush(); } };
+  return { app, get, requests, timers, confirmCalls: () => confirmCalls, async runTimer(delay, latest = false) { const entries = [...timers.entries()].filter(([, timer]) => timer.delay === delay); const entry = latest ? entries.at(-1) : entries[0]; assert.ok(entry, `Expected timer after ${delay}ms`); timers.delete(entry[0]); await entry[1].callback(); await flush(); } };
 }
 const tests = [];
 function test(name, run) { tests.push({ name, run }); }
@@ -1121,7 +1122,7 @@ test('fact detail reloads the current version, shows deleted evidence and keeps 
 });
 test('fact create selects real project and topic, retains a real source and reuses operationId after response loss', async () => {
   const writes = []; const h = factsHarness((_url, options) => { if (options.method === 'POST') { writes.push(JSON.parse(options.body)); throw new TypeError('lost'); } });
-  h.app.factEditor('decisions', null, { ...sampleMessage, topicId: 't1' }); await flush(); await flush();
+  h.app.factEditor('decisions', null, { ...sampleMessage, topicId: 't1' }); await until(() => !button(h.app.dialogContent, '保存决策').disabled);
   const form = find(h.app.dialogContent, n => n.tagName === 'FORM'); find(form, n => n.name === 'text').value = '明确的决定';
   await fire(form, 'submit'); await fire(form, 'submit');
   assert.equal(writes.length, 2); assert.equal(writes[0].operationId, writes[1].operationId);
@@ -1215,6 +1216,100 @@ test('AI unknown fields and HTML evidence stay inert text and technical details 
   const h = factsHarness(url => url.endsWith('/analysis/run-1') ? response(sampleRun({ resultJson: { summary: '<script>bad()</script>', operations: [sampleOperation({ evidence: '<img src=x onerror=bad()>', changes: { text: '<svg onload=bad()>', unknown: 'not a control' } })] } })) : undefined);
   await h.app.openMessageAnalysis('m1'); assert.equal(descendants(h.app.dialogContent).filter(n => ['SCRIPT', 'IMG', 'SVG'].includes(n.tagName)).length, 0);
   assert.ok(descendants(h.app.dialogContent).filter(n => n.tagName === 'DETAILS').every(n => !n.open));
+});
+
+function projectReviewHarness(reason, writeHandler) {
+  return harness((url, options) => {
+    if (options.method) return writeHandler(url, options);
+    if (url.endsWith('/reviews/r1')) return response({ id: 'r1', entityType: 'email_message', entityId: 'm1', sourceMessage: { id: 'm1', subject: 'Synthetic old project review' }, status: 'pending', reasonCode: reason, proposedChangeJson: {} });
+    if (url.endsWith('/messages/by-id/m1')) return response({ id: 'm1', projectAssignmentVersion: 7, projectManualOverride: false });
+    if (url.includes('/projects?')) return response({ total: 2, projects: [{ id: 'old', name: '已结束旧项目', status: 'completed' }, { id: 'other', name: '另一项目', status: 'active' }] });
+    return response({ total: 0, reviews: [] });
+  });
+}
+for (const reason of ['PROJECT_UNRESOLVED', 'PROJECT_ANALYSIS_UNCERTAIN']) {
+  test(`${reason}: named existing-project confirmation cancels without writes and freezes the selected target`, async () => {
+    const writes = [], pending = deferred(); const h = projectReviewHarness(reason, (url, options) => { writes.push({ url, body: JSON.parse(options.body) }); return pending.promise; });
+    await h.app.openReview('r1'); await until(() => descendants(h.app.dialogContent).some(n => n.tagName === 'OPTION' && n.value === 'old'));
+    const picker = find(h.app.dialogContent, n => n.tagName === 'SELECT'); picker.value = 'old';
+    const analysis = reason.includes('ANALYSIS'), actionLabel = analysis ? '分配到所选项目' : '分配到项目', confirmLabel = analysis ? '确认归入并锁定' : '确认并保存';
+    await fire(button(h.app.dialogContent, actionLabel));
+    let confirmation = find(h.app.dialogContent, n => n.classList.contains('inline-confirmation'));
+    assert.match(confirmation.textContent, /已结束旧项目/); await fire(button(confirmation, '取消')); assert.equal(writes.length, 0);
+    await fire(button(h.app.dialogContent, actionLabel)); confirmation = find(h.app.dialogContent, n => n.classList.contains('inline-confirmation'));
+    picker.value = 'other'; const submit = button(confirmation, confirmLabel), saving = fire(submit); await flush();
+    assert.equal(submit.disabled, true); assert.equal(button(confirmation, '取消').disabled, true);
+    await fire(submit); assert.equal(writes.length, 1); assert.equal(writes[0].body.projectId, 'old'); assert.ok(writes[0].body.operationId);
+    if (analysis) assert.equal(writes[0].body.expectedVersion, 7); else assert.equal(writes[0].body.action, 'assign_project');
+    pending.resolve(response({ status: 'resolved' })); await saving; assert.equal(h.get('#detail-dialog').open, false);
+  });
+  test(`${reason}: write timeout preserves confirmation, target and operationId without an automatic retry`, async () => {
+    const writes = []; const h = projectReviewHarness(reason, (_url, options) => { writes.push(JSON.parse(options.body)); return new Promise(() => {}); });
+    await h.app.openReview('r1'); await until(() => descendants(h.app.dialogContent).some(n => n.tagName === 'OPTION' && n.value === 'old'));
+    find(h.app.dialogContent, n => n.tagName === 'SELECT').value = 'old';
+    await fire(button(h.app.dialogContent, reason.includes('ANALYSIS') ? '分配到所选项目' : '分配到项目'));
+    const confirmation = find(h.app.dialogContent, n => n.classList.contains('inline-confirmation'));
+    const save = button(confirmation, reason.includes('ANALYSIS') ? '确认归入并锁定' : '确认并保存'); const first = fire(save); await flush();
+    await h.runTimer(5000, true); assert.match(h.app.dialogContent.textContent, /请勿重复提交/);
+    await h.runTimer(120000, true); await first;
+    assert.equal(writes.length, 1); assert.equal(h.get('#detail-dialog').open, true); assert.equal(save.disabled, false);
+    assert.ok(descendants(h.app.dialogContent).includes(confirmation)); assert.match(h.app.dialogContent.textContent, /操作可能已经保存/);
+    const retry = fire(save); await flush(); assert.equal(writes.length, 2); assert.equal(writes[0].operationId, writes[1].operationId);
+    await h.runTimer(120000, true); await retry;
+  });
+}
+test('slow page reads announce waiting, time out with a read retry and ignore a late response', async () => {
+  const pending = deferred(); let attempt = 0;
+  const h = harness(url => url.includes('/crm/companies?') && attempt++ === 0 ? pending.promise : response({ total: 0, companies: [] }));
+  const load = h.app.loadPage('companies'); await flush(); await h.runTimer(5000, true);
+  assert.match(h.app.content.textContent, /读取较慢/); await h.runTimer(30000, true); await load;
+  assert.match(h.app.content.textContent, /读取超时/); await fire(button(h.app.content, '重新读取'));
+  const before = h.app.content.textContent; pending.resolve(response({ companies: [{ id: 'late', name: 'Late old data' }], total: 1 })); await flush();
+  assert.equal(h.app.content.textContent, before); assert.ok(h.requests.find(r => r.url.includes('/crm/companies?')).options.signal.aborted);
+});
+test('read deadline also bounds stalled response body parsing', async () => {
+  const body = deferred(); const h = harness(() => ({ ...response({}), json: () => body.promise }));
+  const read = h.app.requestScope().api('/mail/test-body').catch(e => e); await flush(); await h.runTimer(30000, true);
+  assert.equal((await read).code, 'REQUEST_TIMEOUT'); body.resolve({ late: true }); await flush();
+});
+test('navigation immediately cancels an ignored read signal and removes slow feedback', async () => {
+  const h = harness(url => url.includes('/classifications/messages') ? new Promise(() => {}) : response({ total: 0, companies: [] }));
+  const old = h.app.loadPage('inbox'); await flush(); await h.runTimer(5000, true);
+  await h.app.loadPage('companies'); await old;
+  assert.doesNotMatch(h.app.content.textContent, /读取较慢/); assert.match(h.app.content.textContent, /公司列表/);
+});
+test('session restoration timeout offers retry without treating a slow connection as sign-out', async () => {
+  const h = harness(() => response({}), () => new Promise(() => {})); await h.runTimer(30000);
+  await until(() => descendants(h.get('.auth-loading-card')).some(n => n.tagName === 'BUTTON'));
+  assert.ok(h.get('#login').classList.contains('hidden')); assert.match(h.get('.auth-loading-card').textContent, /读取超时/);
+});
+test('a stale review write cannot close a newer dialog or navigate to the review page', async () => {
+  const pending = deferred(); const h = projectReviewHarness('PROJECT_UNRESOLVED', () => pending.promise);
+  await h.app.openReview('r1'); await fire(button(h.app.dialogContent, '忽略此项'));
+  const saving = fire(button(find(h.app.dialogContent, n => n.classList.contains('inline-confirmation')), '确认忽略')); await flush();
+  await h.app.openTask('new-task'); const current = h.app.dialogContent.textContent;
+  pending.resolve(response({ status: 'resolved' })); await saving;
+  assert.equal(h.app.dialogContent.textContent, current); assert.equal(h.get('#detail-dialog').open, true); assert.equal(h.app.state.page, 'overview');
+  h.app.closeDialog(); assert.equal(h.get('#detail-dialog').open, false, 'the old write must not leave the newer dialog busy');
+});
+test('data-table scroll regions expose keyboard focus and meaningful column labels', async () => {
+  const h = harness(() => response({ companies: [{ id: 'one', name: 'Long address synthetic company' }], total: 1 }));
+  await h.app.loadPage('companies'); const region = find(h.app.content, n => n.classList.contains('table-wrap'));
+  assert.equal(region.attributes.tabindex, '0'); assert.equal(region.attributes.role, 'region'); assert.match(region.attributes['aria-label'], /窄屏可横向滚动/);
+});
+test('project assignment conflict keeps the inline decision unconfirmed and explains how to recover', async () => {
+  const h = projectReviewHarness('PROJECT_ANALYSIS_UNCERTAIN', () => response({ code: 'PROJECT_ASSIGNMENT_CONFLICT' }, 409));
+  await h.app.openReview('r1'); await fire(button(h.app.dialogContent, '确认非项目并锁定'));
+  const confirmation = find(h.app.dialogContent, n => n.classList.contains('inline-confirmation'));
+  await fire(button(confirmation, '确认非项目并锁定'));
+  assert.ok(descendants(h.app.dialogContent).includes(confirmation)); assert.match(h.app.dialogContent.textContent, /归属已被其他操作更新/);
+  assert.equal(h.get('#detail-dialog').open, true); assert.doesNotMatch(h.get('#notice').textContent, /已人工确认/);
+});
+test('review read timeout exposes a safe read-only retry rather than an empty or successful decision', async () => {
+  let reads = 0; const h = harness(url => url.endsWith('/reviews/r1') && reads++ === 0 ? new Promise(() => {}) : response({ id: 'r1', entityType: 'email_message', reasonCode: 'PROJECT_UNRESOLVED', status: 'pending' }));
+  const read = h.app.openReview('r1'); await flush(); await h.runTimer(30000, true); await read;
+  assert.match(h.app.dialogContent.textContent, /读取超时/); await fire(button(h.app.dialogContent, '重新读取复核'));
+  assert.match(h.app.dialogContent.textContent, /无法匹配项目/); assert.equal(h.requests.filter(r => r.options.method).length, 0);
 });
 
 (async () => {

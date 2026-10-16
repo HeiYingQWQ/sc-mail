@@ -331,6 +331,20 @@ async function seedRecoveryFixtures() {
   }
 }
 
+async function seedLayoutFixtures() {
+  const address = 'synthetic-long-address-' + 'x'.repeat(40) + '@' + ('regional-office-'.repeat(2) + 'region.').repeat(3) + 'acceptance.invalid';
+  const company = await prisma.company.create({ data: { name: '隔离验收公司 · International Regional Operations', website: 'https://acceptance.invalid/' + 'long-reference/'.repeat(12), address: 'SyntheticAddressWithoutSpaces'.repeat(8), notes: '仅为窄屏排版和旧项目复核复验的合成公司。' } });
+  const contact = await prisma.contact.create({ data: { companyId: company.id, displayName: '合成长地址联系人', status: 'confirmed', emails: { create: { email: address, isPrimary: true } } } });
+  const project = await prisma.project.create({ data: { companyId: company.id, name: '旧项目 · 已结束的合成交付验收', status: 'completed', stage: 'completed', projectContacts: { create: { contactId: contact.id, isPrimary: true } } } });
+  const messages = await prisma.emailMessage.findMany({ where: { classification: 'BUSINESS_HUMAN', direction: 'inbound' }, take: 3, orderBy: { id: 'asc' } });
+  for (const [index, message] of messages.entries()) {
+    await prisma.emailMessage.update({ where: { id: message.id }, data: { fromJson: [{ name: '合成长地址来源', address }], companyId: company.id, contactId: contact.id, projectResolutionStatus: 'review_pending' } });
+    const key = `ui-layout-review-${index}`;
+    await prisma.reviewItem.create({ data: { entityType: 'email_message', entityId: message.id, sourceMessageId: message.id, dedupeKey: key, dedupeKeyBase: key, confidence: 0.65, reasonCode: index ? 'PROJECT_ANALYSIS_UNCERTAIN' : 'PROJECT_UNRESOLVED', proposedChangeJson: { reason: '合成来信可能涉及已结束的旧项目，必须核对后人工决定。', candidates: [{ id: project.id, name: project.name, status: project.status }], evidence: [{ source_message_id: message.id, excerpt: message.bodyText.slice(0, 100) }] } } });
+  }
+  return { companyId: company.id, contactId: contact.id, projectId: project.id, longAddress: address };
+}
+
 async function makeApplication() {
   const auth = new AuthService(prisma, config);
   const systemMailSenders = new SystemMailSendersService(prisma);
@@ -366,6 +380,11 @@ async function makeApplication() {
 
   const httpApp = await NestFactory.create(UiCrmAcceptanceModule, { logger: false });
   httpApp.setGlobalPrefix('api/v1');
+  const readDelay = Math.min(10000, Math.max(0, Number(process.env.UI_CRM_READ_DELAY_MS) || 0));
+  if (readDelay) httpApp.use((request, _response, next) => {
+    if (request.method === 'GET' && /^\/api\/v1\/mail\/reviews\/[^/]+$/.test(request.path)) setTimeout(next, readDelay);
+    else next();
+  });
   httpApp.use((request, response, next) => {
     try {
       if (!request.path?.startsWith('/api/v1/') || request.headers.authorization) return next();
@@ -410,6 +429,7 @@ async function main() {
       env: { ...process.env, DATABASE_URL: testUrl.toString() }, stdio: 'inherit', cwd: root,
     });
     await seedDatabase();
+    const layoutFixture = process.env.UI_CRM_LAYOUT_FIXTURES === '1' ? await seedLayoutFixtures() : null;
     if (process.env.UI_CRM_RECOVERY_FIXTURES === '1') await seedRecoveryFixtures();
     if (process.env.UI_CRM_BUSINESS_FIXTURES === '1') {
       const message = await prisma.emailMessage.findFirstOrThrow({ where: { classification: 'BUSINESS_HUMAN', direction: 'inbound' }, orderBy: { receivedAt: 'desc' } });
@@ -445,13 +465,14 @@ async function main() {
       listening: `0.0.0.0:${port}`, browserUrl: 'http://127.0.0.1:3001/dashboard/',
       login: { email: userEmail, password: userPassword, mustChangePassword: false },
       mailbox: accountEmail,
+      layoutFixture,
       contactsToCreateManually: [
         { name: 'Anna Fischer', email: 'anna@nordlicht.invalid', company: 'Nordlicht Energie', project: 'Berlin Retrofit 2026' },
         { name: 'Morgan Reed', email: 'morgan@cedar.invalid', company: 'Cedar Point Logistics', project: 'Austin Packaging Line 2026' },
       ],
       messageFixture: { physicalMessages: projectFixtureMessages.length, logicalMessages: new Set(projectFixtureMessages.map((item) => item.rfcId)).size, contains: ['German 2026 project', 'US 2026 project', '2027 opportunity', 'holiday greeting', 'sent mail', 'CC/BCC', 'Inbox/Archive duplicate', 'changed-subject bottom reply', 'cross-project manual review'] },
       deliveryFixture: { physicalReports: deliveryFixtureMessages.length, logicalReports: new Set(deliveryFixtureMessages.map((item) => item.rfcId)).size, configuredSyntheticSender: deliverySender, contains: ['multiple failed recipients', 'unknown target despite mailbox To header', 'delay status', 'delivered notification', 'Inbox/Archive duplicate', 'Europe/Rome DST day includes 00:30Z and 21:59Z but excludes 22:01Z'] },
-      safety: { imap: 'disabled fake transport', notifications: 'disabled', model: 'fake AIProvider only', crmSeeded: false, cleanup: 'exact isolated database is dropped on SIGINT/SIGTERM' },
+      safety: { imap: 'disabled fake transport', notifications: 'disabled', model: 'fake AIProvider only', crmSeeded: Boolean(layoutFixture), cleanup: 'exact isolated database is dropped on SIGINT/SIGTERM' },
     }, null, 2));
     await waitForShutdown();
   } catch (error) {
