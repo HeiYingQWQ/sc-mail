@@ -180,6 +180,12 @@ worker 每分钟检查；默认 BUSINESS_TIMEZONE 每日 05:00，MAIL_RECONCILIA
 
 保留人工创建/确认/修改、合并或有业务依赖的记录；纯自动且无依赖的记录可审计退档，不能清空 provisional、联系人、邮件或其他复核。退档不删除原始邮件；恢复只针对对应操作，不能越权夺回后续已人工登记的邮箱。物理删除另需具体清单与授权。
 
+## 需求、决策与 AI 建议操作
+
+Dashboard 的“需求”“决策”按项目筛选、分页，详情读取当前版本和来源；新建可选项目/Topic，邮件详情可带真实来源创建。编辑只提交正文、状态与 expectedVersion，保留关联；冲突后关闭表单、刷新最新记录再决定，不用新版本盲目覆盖。决策 proposed 表示待确认，不能当成已接受的共识。项目概览也提供创建、详情及查看全部入口。
+
+“AI 建议”展示分析候选，已有记录可从任意来源邮件进入；读取历史不调用模型。确认新分析后只保存建议/可能的复核，业务写入必须再逐条确认。保存/应用会按原业务实现产生事实、审计及业务事件，后续可能按既有策略通知 WhatsApp；隔离 fixture 始终禁用渠道。中断可恢复原分析编号；网络结果不明重试复用原编号，先刷新历史核查。失败/复核/旧 Schema 不能应用，目标人工保护与来源新鲜度仍由服务端校验。每次仅应用一条，失败不会把其他建议一起提交；摘要、分类和项目/Topic 建议仅供参考。会话内“已处理”反馈不代替持久审计，完整重载后服务端仍负责幂等。
+
 ## 开发验证与 CI复现
 
 [CI](../.github/workflows/ci.yml) 在 PR、main push 和手动触发时运行，权限为 contents:read，使用 Node.js 24、pnpm 11.19.0、PostgreSQL 17 与冻结锁文件。验证 Prisma、类型/构建、适配与 UI、审查修复、CRM/项目分析及真实 CLI/MCP→HTTP→隔离 PostgreSQL。CI 只使用合成邮件、fake Provider 和无生产凭据的环境，不能代表真实通知或部署验收。合并规则见 [AGENTS](../AGENTS.md#github-分支与合并)。
@@ -224,6 +230,8 @@ node scripts/run-ui-crm-acceptance.cjs
 浏览器入口为 `http://127.0.0.1:3001/dashboard/`，凭据按 fixture 本地输出使用；不要将输出提交。进程退出时清理它创建的隔离库。CLI/HTTP suite 用 `pnpm verify:crm-cli-http`。如需复现 CI 的 fixture，使用工作流的 `UI_CRM_RUN_CLI_SUITE=1` 设置。
 
 恢复/复核界面验收可在启动前额外设置 `$env:UI_CRM_RECOVERY_FIXTURES='1'`、`$env:UI_CRM_RUN_CLI_SUITE='0'`；添加两条合成重要性记录和两条复核，不运行重要性 worker，通知允许列表为空。检查筛选/刷新、来源阅读、取消确认不写入、单条确认后排队及桌面/窄屏文案；不能把排队视为处理成功。自动化 `pnpm verify:dashboard` 覆盖失联重试、并发与迟到响应、跨会话 401、错误/空态、未知原因和不可信文本，沿用现有 CI 执行。
+
+需求/决策/建议的浏览器复现可在 UI fixture 启动前设置 `$env:UI_CRM_BUSINESS_FIXTURES='1'` 和 `$env:UI_CRM_RUN_CLI_SUITE='0'`：种入两条带来源的合成业务记录，并仅在 fake Provider 边界生成有真实合成原文引用的需求/决策提案。模型不出网，通知关闭；不自动应用提案。`verify:dashboard` 验证界面确认、版本/重复/迟到响应与安全文本，`verify:integration-local` 验证真实 HTTP/隔离库的详情、历史分页、跨邮箱拒绝和幂等；两者均沿用现有 CI。
 
 ### P0 隔离恢复及完整回归
 

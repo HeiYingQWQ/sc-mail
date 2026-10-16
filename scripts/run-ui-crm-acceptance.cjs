@@ -56,6 +56,7 @@ async function main() {
     UI_CRM_ALLOW_LOCAL_DB_CREATE: '1',
     UI_CRM_RUN_CLI_SUITE: process.env.UI_CRM_RUN_CLI_SUITE === '1' ? '1' : '0',
     UI_CRM_RECOVERY_FIXTURES: process.env.UI_CRM_RECOVERY_FIXTURES === '1' ? '1' : '0',
+    UI_CRM_BUSINESS_FIXTURES: process.env.UI_CRM_BUSINESS_FIXTURES === '1' ? '1' : '0',
     APP_ROLE: 'ui_fixture',
     PORT: '3000',
     AI_PROVIDER: 'fixture',

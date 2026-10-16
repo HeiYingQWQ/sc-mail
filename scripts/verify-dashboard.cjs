@@ -7,7 +7,7 @@ const { webcrypto } = require('node:crypto');
 
 const root = path.resolve(__dirname, '..');
 const appSource = fs.readFileSync(path.join(root, 'apps/dashboard/app.js'), 'utf8');
-const source = appSource.replace(/\}\)\(\);\s*$/, 'globalThis.testApp = { state, loadPage, openEmail, openTask, openReview, openContact, openCompany, openProject, contactEditor, companyEditor, projectEditor, projectAnalysisDialog, pagedSelect, requestScope, setTimezone, formatDate, formatApiError, closeDialog, createTopicDialog, content, dialogContent }; })();');
+const source = appSource.replace(/\}\)\(\);\s*$/, 'globalThis.testApp = { state, loadPage, openEmail, openTask, openReview, openContact, openCompany, openProject, openFact, factEditor, openMessageAnalysis, contactEditor, companyEditor, projectEditor, projectAnalysisDialog, pagedSelect, requestScope, setTimezone, formatDate, formatApiError, closeDialog, createTopicDialog, content, dialogContent }; })();');
 
 class Element {
   constructor(tag = 'div') {
@@ -1080,6 +1080,131 @@ test('deleted-source review guidance blocks source navigation and avoids an assi
   assert.equal(button(h.app.dialogContent, '来源邮件已删除').disabled, true);
 });
 
+
+const sampleFact = { id: 'fact-1', text: '合成需求与决策', status: 'open', version: 7, projectId: 'p1', project: { id: 'p1', name: '合成项目' }, sourceMessageId: 'm1', sourceMessage: { id: 'm1', subject: '合成原文' } };
+const sampleMessage = { id: 'm1', subject: '合成业务来信', classification: 'BUSINESS_HUMAN', projectId: 'p1', bodyText: 'Synthetic source evidence' };
+const sampleOperation = extra => ({ entity_type: 'requirement', action: 'create', target_id: null, source_message_id: 'm1', confidence: 0.95, evidence: 'Synthetic source evidence', task_outcome: 'none', changes: { text: '保存合成需求', status: 'open' }, ...extra });
+const sampleRun = extra => ({ id: 'run-1', sourceMessageId: 'm1', status: 'completed', schemaVersion: '3', validationStatus: 'valid', model: 'synthetic', resultJson: { summary: '合成摘要，尚未应用', operations: [sampleOperation()] }, ...extra });
+function factsHarness(custom = () => undefined) {
+  return harness((url, options = {}) => {
+    const result = custom(url, options); if (result !== undefined) return result;
+    if (url.includes('/mail/messages/by-id/')) return response(sampleMessage);
+    if (url.includes('/mail/analysis?')) return response({ total: 1, runs: [sampleRun()] });
+    if (url.endsWith('/analysis/run-1')) return response(sampleRun());
+    if (url.includes('/mail/requirements?')) return response({ total: 21, requirements: [sampleFact] });
+    if (url.includes('/mail/decisions?')) return response({ total: 21, decisions: [{ ...sampleFact, status: 'proposed' }] });
+    if (url.endsWith('/requirements/fact-1') || url.endsWith('/decisions/fact-1')) return response(sampleFact);
+    if (url.includes('/projects?')) return response({ total: 1, projects: [{ id: 'p1', name: '合成项目' }] });
+    if (url.endsWith('/projects/p1')) return response({ id: 'p1', name: '合成项目', topics: [{ id: 't1', name: '合成 Topic', status: 'active' }] });
+    return response({ total: 0 });
+  });
+}
+for (const kind of ['requirements', 'decisions']) test(`${kind} list preserves project filter through pagination and exposes real text and source`, async () => {
+  const h = factsHarness(); h.app.state.filters[kind + 'Project'] = 'p1'; await h.app.loadPage(kind);
+  assert.match(h.app.content.textContent, /合成需求与决策/); assert.match(h.app.content.textContent, /合成项目/);
+  assert.match(h.app.content.textContent, kind === 'decisions' ? /待确认/ : /待处理/);
+  await fire(button(h.app.content, '下一页'));
+  assert.ok(h.requests.some(r => r.url.includes(`/mail/${kind}?projectId=p1&limit=20&offset=20`)));
+  assert.equal(h.requests.filter(r => r.options.method).length, 0);
+});
+test('fact detail reloads the current version, shows deleted evidence and keeps conflicts visible', async () => {
+  const h = factsHarness((url, options) => {
+    if (options.method === 'PATCH') return response({ code: 'VERSION_CONFLICT' }, 409);
+    if (url.endsWith('/requirements/fact-1')) return response({ ...sampleFact, sourceDeletedAt: '2026-10-16T00:00:00Z', manualOverride: true });
+  });
+  await h.app.openFact('requirements', 'fact-1'); assert.match(h.app.dialogContent.textContent, /来源邮件已删除/);
+  await fire(button(h.app.dialogContent, '编辑需求')); const form = find(h.app.dialogContent, n => n.tagName === 'FORM');
+  find(form, n => n.name === 'text').value = '人工更正'; await fire(form, 'submit');
+  const write = h.requests.find(r => r.options.method === 'PATCH'), body = JSON.parse(write.options.body);
+  assert.equal(body.expectedVersion, 7); assert.equal(body.text, '人工更正'); assert.deepEqual(Object.keys(body).sort(), ['expectedVersion', 'operationId', 'status', 'text']);
+  assert.match(h.app.dialogContent.textContent, /已被其他操作更新/); assert.equal(h.app.dialogContent.querySelector('form'), form);
+});
+test('fact create selects real project and topic, retains a real source and reuses operationId after response loss', async () => {
+  const writes = []; const h = factsHarness((_url, options) => { if (options.method === 'POST') { writes.push(JSON.parse(options.body)); throw new TypeError('lost'); } });
+  h.app.factEditor('decisions', null, { ...sampleMessage, topicId: 't1' }); await flush(); await flush();
+  const form = find(h.app.dialogContent, n => n.tagName === 'FORM'); find(form, n => n.name === 'text').value = '明确的决定';
+  await fire(form, 'submit'); await fire(form, 'submit');
+  assert.equal(writes.length, 2); assert.equal(writes[0].operationId, writes[1].operationId);
+  assert.equal(writes[0].projectId, 'p1'); assert.equal(writes[0].topicId, 't1'); assert.equal(writes[0].sourceMessageId, 'm1'); assert.equal(writes[0].status, 'proposed');
+});
+test('fact topic loading ignores late data for the previous project', async () => {
+  const late = deferred(); const h = factsHarness(url => url.endsWith('/projects/p1') ? late.promise : undefined);
+  h.app.factEditor('requirements'); await flush();
+  const project = find(h.app.dialogContent, n => n.tagName === 'SELECT' && n.options.some(o => o.value === 'p1'));
+  project.value = 'p1'; const first = fire(project, 'change'); project.value = ''; await fire(project, 'change');
+  late.resolve(response({ topics: [{ id: 'stale', name: '过时 Topic', status: 'active' }] })); await first;
+  assert.doesNotMatch(h.app.dialogContent.textContent, /过时 Topic/); assert.equal(button(h.app.dialogContent, '保存需求').disabled, false);
+});
+test('AI history is paginated for one source and reading never calls the model', async () => {
+  const h = factsHarness(url => url.includes('/analysis?') ? response({ total: 11, runs: [sampleRun()] }) : undefined);
+  await h.app.openMessageAnalysis('m1'); assert.match(h.app.dialogContent.textContent, /合成摘要，尚未应用/);
+  await fire(button(h.app.dialogContent, '下一页'));
+  assert.ok(h.requests.some(r => r.url.includes('/analysis?messageId=m1&limit=10&offset=10')));
+  assert.equal(h.requests.filter(r => r.options.method === 'POST').length, 0);
+});
+test('AI generation requires confirmation and reuses uncertain operationId without applying facts', async () => {
+  const writes = []; const h = factsHarness((url, options) => { if (url.endsWith('/analysis') && options.method === 'POST') { writes.push(JSON.parse(options.body)); throw new TypeError('lost'); } });
+  await h.app.openMessageAnalysis('m1'); await fire(button(h.app.dialogContent, '生成新的分析建议'));
+  assert.equal(writes.length, 0); await fire(button(h.app.dialogContent, '取消')); assert.equal(writes.length, 0);
+  await fire(button(h.app.dialogContent, '生成新的分析建议')); await fire(button(h.app.dialogContent, '确认分析这封邮件'));
+  await fire(button(h.app.dialogContent, '确认分析这封邮件'));
+  assert.equal(writes.length, 2); assert.equal(writes[0].operationId, writes[1].operationId); assert.equal(writes[0].messageId, 'm1');
+  assert.equal(h.requests.filter(r => r.url.endsWith('/apply')).length, 0);
+});
+test('AI apply submits only the confirmed original index and reuses its id after response loss', async () => {
+  const writes = []; const h = factsHarness((url, options) => {
+    if (url.endsWith('/analysis/run-1')) return response(sampleRun({ resultJson: { operations: [sampleOperation({ entity_type: 'project' }), sampleOperation()] } }));
+    if (url.endsWith('/apply')) { writes.push(JSON.parse(options.body)); if (writes.length === 1) throw new TypeError('lost'); return response({ applied: 1, records: [{ id: 'fact-1' }] }); }
+  });
+  await h.app.openMessageAnalysis('m1'); const applies = descendants(h.app.dialogContent).filter(n => n.tagName === 'BUTTON' && n.textContent === '应用这条建议');
+  assert.equal(applies[0].disabled, true); assert.equal(applies[1].disabled, false);
+  await fire(applies[1]); assert.equal(writes.length, 0); await fire(button(h.app.dialogContent, '确认应用这条建议')); await fire(button(h.app.dialogContent, '确认应用这条建议'));
+  assert.equal(writes.length, 2); assert.deepEqual(writes[0].operationIndexes, [1]); assert.equal(writes[0].operationId, writes[1].operationId);
+  assert.equal(applies[1].disabled, true); assert.match(h.app.dialogContent.textContent, /其他建议未应用/);
+});
+test('completed AI generation reopens persisted results with a usable new-analysis control', async () => {
+  const h = factsHarness((url, options) => url.endsWith('/analysis') && options.method === 'POST' ? response(sampleRun()) : undefined);
+  await h.app.openMessageAnalysis('m1'); await fire(button(h.app.dialogContent, '生成新的分析建议')); await fire(button(h.app.dialogContent, '确认分析这封邮件'));
+  assert.equal(button(h.app.dialogContent, '生成新的分析建议').disabled, false);
+  assert.match(h.app.dialogContent.textContent, /本次建议/);
+});
+test('interrupted AI analysis exposes an explicit same-operation recovery before another model call', async () => {
+  const writes = []; const run = sampleRun({ status: 'failed', errorCode: 'AI_ANALYSIS_INTERRUPTED', requestKey: 'original-analysis-operation' });
+  const h = factsHarness((url, options) => url.endsWith('/analysis/run-1') ? response(run) : url.endsWith('/analysis') && options.method === 'POST' ? (writes.push(JSON.parse(options.body)), response(run)) : undefined);
+  await h.app.openMessageAnalysis('m1'); await fire(button(h.app.dialogContent, '恢复这次中断分析')); await flush();
+  assert.equal(writes.length, 0); await fire(button(h.app.dialogContent, '重试未确认的分析')); await fire(button(h.app.dialogContent, '确认分析这封邮件'));
+  assert.equal(writes[0].operationId, 'original-analysis-operation');
+});
+test('AI apply blocks double clicks while a single write is pending', async () => {
+  const late = deferred(); let writes = 0; const h = factsHarness(url => url.endsWith('/apply') ? (writes++, late.promise) : undefined);
+  await h.app.openMessageAnalysis('m1'); await fire(button(h.app.dialogContent, '应用这条建议'));
+  const confirm = button(h.app.dialogContent, '确认应用这条建议'), first = fire(confirm); await flush(); await fire(confirm);
+  assert.equal(writes, 1); late.resolve(response({ applied: 1 })); await first;
+});
+test('review-required, failed, legacy, protected or mismatched AI proposals have no enabled apply', async () => {
+  const cases = [sampleRun({ validationStatus: 'review_required' }), sampleRun({ status: 'failed', errorCode: 'AI_TIMEOUT' }), sampleRun({ schemaVersion: '2' }), sampleRun({ resultJson: { operations: [sampleOperation({ source_message_id: 'other' })] } }), sampleRun({ resultJson: { operations: [sampleOperation({ action: 'update', target_id: 'fact-1' })] } })];
+  for (const run of cases) {
+    const h = factsHarness(url => url.endsWith('/analysis/run-1') ? response(run) : url.endsWith('/requirements/fact-1') ? response({ ...sampleFact, manualOverride: true }) : undefined);
+    await h.app.openMessageAnalysis('m1');
+    assert.ok(descendants(h.app.dialogContent).filter(n => n.tagName === 'BUTTON' && n.textContent === '应用这条建议').every(n => n.disabled));
+    assert.equal(h.requests.filter(r => r.options.method === 'POST').length, 0);
+  }
+});
+test('AI stale source conflict keeps the suggestion unconfirmed and offers a readable recovery', async () => {
+  const h = factsHarness(url => url.endsWith('/apply') ? response({ code: 'STALE_SOURCE' }, 409) : undefined);
+  await h.app.openMessageAnalysis('m1'); await fire(button(h.app.dialogContent, '应用这条建议')); await fire(button(h.app.dialogContent, '确认应用这条建议'));
+  assert.match(h.app.dialogContent.textContent, /已有更新邮件/); assert.doesNotMatch(h.app.dialogContent.textContent, /服务端已处理本条建议/);
+});
+test('late AI target read cannot append suggestions to a different modal', async () => {
+  const late = deferred(); const h = factsHarness(url => url.endsWith('/analysis/run-1') ? response(sampleRun({ resultJson: { operations: [sampleOperation({ action: 'update', target_id: 'fact-1' })] } })) : url.endsWith('/requirements/fact-1') ? late.promise : undefined);
+  const previous = h.app.openMessageAnalysis('m1'); await flush(); await h.app.openEmail('new'); const before = h.app.dialogContent.textContent;
+  late.resolve(response(sampleFact)); await previous; assert.equal(h.app.dialogContent.textContent, before);
+});
+test('AI unknown fields and HTML evidence stay inert text and technical details are collapsed', async () => {
+  const h = factsHarness(url => url.endsWith('/analysis/run-1') ? response(sampleRun({ resultJson: { summary: '<script>bad()</script>', operations: [sampleOperation({ evidence: '<img src=x onerror=bad()>', changes: { text: '<svg onload=bad()>', unknown: 'not a control' } })] } })) : undefined);
+  await h.app.openMessageAnalysis('m1'); assert.equal(descendants(h.app.dialogContent).filter(n => ['SCRIPT', 'IMG', 'SVG'].includes(n.tagName)).length, 0);
+  assert.ok(descendants(h.app.dialogContent).filter(n => n.tagName === 'DETAILS').every(n => !n.open));
+});
 
 (async () => {
   let failed = 0;

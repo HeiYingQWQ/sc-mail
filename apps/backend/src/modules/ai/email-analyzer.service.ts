@@ -261,6 +261,20 @@ export class EmailAnalyzerService {
     return run;
   }
 
+  async listRuns(messageIdValue: unknown, limit: number, offset: number) {
+    const messageId = this.requiredText(messageIdValue, 'messageId', 100);
+    const account = await this.account();
+    const message = await this.prisma.emailMessage.findFirst({ where: { id: messageId, mailAccountId: account.id }, select: { id: true } });
+    if (!message) throw new NotFoundException('Imported email not found');
+    const where = { mailAccountId: account.id, sourceMessageId: message.id };
+    const [total, runs] = await this.prisma.$transaction([
+      this.prisma.analysisRun.count({ where }),
+      this.prisma.analysisRun.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: limit, skip: offset,
+        select: { id: true, sourceMessageId: true, status: true, validationStatus: true, schemaVersion: true, model: true, errorCode: true, createdAt: true, completedAt: true } }),
+    ]);
+    return { total, limit, offset, runs };
+  }
+
   async listAuditCandidates(scopeInput: unknown, limit: number, offset: number) {
     const scope = typeof scopeInput === 'string' && scopeInput.trim() ? scopeInput.trim() : 'uncertain';
     if (!['uncertain', 'filtered', 'business_without_analysis'].includes(scope)) throw new BadRequestException('Unsupported audit candidate scope');

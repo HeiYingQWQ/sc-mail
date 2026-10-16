@@ -23,6 +23,7 @@ const WAITING_ON = ['us', 'customer', 'third_party', 'mixed', 'none'];
 const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
 const REQUIREMENT_STATUSES = ['open', 'accepted', 'rejected'];
 const DECISION_STATUSES = ['proposed', 'accepted', 'rejected'];
+const FACT_RELATIONS = { project: { select: { id: true, name: true } }, topic: { select: { id: true, name: true } }, sourceMessage: { select: { id: true, subject: true } } } as const;
 
 type MutationInput = {
   operationId: string;
@@ -133,7 +134,7 @@ export class BusinessRecordsService {
       ...(projectId ? { projectId } : {}), ...(topicId ? { topicId } : {}),
       OR: [{ sourceMessage: { mailAccountId: account.id } }, { project: { messages: { some: { mailAccountId: account.id } } } }, { project: { messages: { none: {} } } }, { projectId: null, topicId: null, sourceMessageId: null }],
     };
-    const [total, requirements] = await this.prisma.$transaction([this.prisma.requirement.count({ where }), this.prisma.requirement.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: limit, skip: offset })]);
+    const [total, requirements] = await this.prisma.$transaction([this.prisma.requirement.count({ where }), this.prisma.requirement.findMany({ where, include: FACT_RELATIONS, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: limit, skip: offset })]);
     return { total, offset, limit, requirements };
   }
 
@@ -143,7 +144,7 @@ export class BusinessRecordsService {
       ...(projectId ? { projectId } : {}), ...(topicId ? { topicId } : {}),
       OR: [{ sourceMessage: { mailAccountId: account.id } }, { project: { messages: { some: { mailAccountId: account.id } } } }, { project: { messages: { none: {} } } }, { projectId: null, topicId: null, sourceMessageId: null }],
     };
-    const [total, decisions] = await this.prisma.$transaction([this.prisma.decision.count({ where }), this.prisma.decision.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: limit, skip: offset })]);
+    const [total, decisions] = await this.prisma.$transaction([this.prisma.decision.count({ where }), this.prisma.decision.findMany({ where, include: FACT_RELATIONS, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: limit, skip: offset })]);
     return { total, offset, limit, decisions };
   }
 
@@ -156,8 +157,18 @@ export class BusinessRecordsService {
     return this.mutate({ operationId, actorId: 'api-token-client', entityType: 'requirement', entityId: '', action: 'create', sourceMessageId: data.sourceMessageId, before: null, after: hashValue, hashValue }, async (tx, sourceOperationId) => {
       await this.lockScopeForWrite(tx, [{ projectId: data.projectId as string | null, topicId: data.topicId as string | null }]);
       await this.assertScope(data.projectId, data.topicId, data.sourceMessageId, account.id, tx);
-      return tx.requirement.create({ data: { ...data, createdBy: 'api-token-client', sourceOperationId } });
+      return tx.requirement.create({ data: { ...data, manualOverride: true, createdBy: 'api-token-client', sourceOperationId } });
     });
+  }
+
+  async getRequirement(id: string) {
+    const item = await this.requirementInAccount(id);
+    return this.prisma.requirement.findUniqueOrThrow({ where: { id: item.id }, include: FACT_RELATIONS });
+  }
+
+  async getDecision(id: string) {
+    const item = await this.decisionInAccount(id);
+    return this.prisma.decision.findUniqueOrThrow({ where: { id: item.id }, include: FACT_RELATIONS });
   }
 
   async updateRequirement(id: string, body: Record<string, unknown>) {
@@ -186,7 +197,7 @@ export class BusinessRecordsService {
     return this.mutate({ operationId, actorId: 'api-token-client', entityType: 'decision', entityId: '', action: 'create', sourceMessageId: data.sourceMessageId, before: null, after: hashValue, hashValue }, async (tx, sourceOperationId) => {
       await this.lockScopeForWrite(tx, [{ projectId: data.projectId as string | null, topicId: data.topicId as string | null }]);
       await this.assertScope(data.projectId, data.topicId, data.sourceMessageId, account.id, tx);
-      return tx.decision.create({ data: { ...data, createdBy: 'api-token-client', sourceOperationId, decidedAt: ['accepted', 'rejected'].includes(data.status) ? new Date() : null } });
+      return tx.decision.create({ data: { ...data, manualOverride: true, createdBy: 'api-token-client', sourceOperationId, decidedAt: ['accepted', 'rejected'].includes(data.status) ? new Date() : null } });
     });
   }
 

@@ -755,6 +755,42 @@ async function main() {
     const invalid = await analyzer.analyze(source.id, 'analysis-evidence'); assert.equal(invalid.validationStatus, 'review_required');
     await assert.rejects(records.applyAnalysis(invalid.id, { operationId: 'apply-invalid', operationIndexes: [0] }), e => e.status === 409);
   });
+  await test('Dashboard fact detail and edits use scoped HTTP reads, evidence, CAS and idempotency', async () => {
+    for (const kind of ['requirements', 'decisions']) {
+      const created = await api('/' + kind, 'POST', { operationId: 'ui-fact-create-' + kind, text: 'Synthetic HTTP fact', status: 'accepted', projectId: project.id, sourceMessageId: source.id });
+      assert.equal(created.status, 201); assert.equal(created.body.manualOverride, true); const id = created.body.id;
+      const read = await api('/' + kind + '/' + id); assert.equal(read.status, 200); assert.equal(read.body.version, 1);
+      assert.equal(read.body.sourceMessage.id, source.id); assert.equal(read.body.project.id, project.id);
+      assert.equal((await api('/' + kind + '/' + id, 'GET', undefined, 'wrong')).status, 401);
+      providerResult = result(source, [operation(source, { text: 'Attempt to overwrite a manual fact', status: 'accepted' }, { entity_type: kind === 'requirements' ? 'requirement' : 'decision', action: 'update', target_id: id })]);
+      const suggestion = await analyzer.analyze(source.id, 'ui-protected-fact-' + kind);
+      assert.equal(suggestion.validationStatus, kind === 'requirements' ? 'valid' : 'review_required', JSON.stringify(suggestion.validationErrorsJson));
+      await assert.rejects(records.applyAnalysis(suggestion.id, { operationId: 'ui-protected-apply-' + kind, operationIndexes: [0] }), error => error.status === 409 && error.response?.code === (kind === 'requirements' ? 'MANUAL_OVERRIDE_PROTECTED' : 'ANALYSIS_NOT_APPLICABLE'));
+      const update = { operationId: 'ui-fact-update-' + kind, expectedVersion: 1, status: 'accepted' };
+      assert.equal((await api('/' + kind + '/' + id, 'PATCH', update)).body.version, 2);
+      assert.equal((await api('/' + kind + '/' + id, 'PATCH', update)).body.version, 2);
+      assert.equal((await api('/' + kind + '/' + id, 'PATCH', { ...update, operationId: 'ui-fact-conflict-' + kind })).status, 409);
+      const listing = await api('/' + kind + '?projectId=' + project.id + '&limit=1&offset=0');
+      assert.equal(listing.status, 200); assert.ok(listing.body[kind][0].project.name);
+      await db.businessOperation.deleteMany({ where: { entityId: id } }); await db[kind === 'requirements' ? 'requirement' : 'decision'].delete({ where: { id } });
+    }
+  });
+  await test('Dashboard analysis history paginates metadata only and new detail reads reject another mailbox', async () => {
+    const first = await api('/analysis?messageId=' + source.id + '&limit=1&offset=0'), second = await api('/analysis?messageId=' + source.id + '&limit=1&offset=1');
+    assert.equal(first.status, 200); assert.ok(first.body.total >= 2); assert.notEqual(first.body.runs[0].id, second.body.runs[0].id);
+    for (const forbidden of ['leaseToken', 'requestKey', 'inputSummaryJson', 'resultJson', 'rawSource']) assert.equal(Object.hasOwn(first.body.runs[0], forbidden), false);
+    assert.equal((await api('/analysis?messageId=' + source.id, 'GET', undefined, 'wrong')).status, 401);
+    assert.equal((await api('/analysis')).status, 400); assert.equal((await api('/analysis?messageId=' + source.id + '&limit=101')).status, 400);
+    const foreign = await db.mailAccount.create({ data: { email: 'foreign-ui@acceptance.invalid', host: 'imap.foreign.invalid', port: 993, tlsMode: 'implicit', username: 'synthetic', passwordCiphertext: 'synthetic-only' } });
+    const message = await db.emailMessage.create({ data: { mailAccountId: foreign.id, mailbox: 'INBOX', uidValidity: 1n, uid: 1, providerMessageId: 'foreign-ui', direction: 'inbound', fromJson: [], toJson: [], ccJson: [], bccJson: [], headersJson: {}, rawSource: Buffer.from('synthetic foreign mail') } });
+    try {
+      assert.equal((await api('/analysis?messageId=' + message.id)).status, 404);
+      for (const kind of ['requirement', 'decision']) {
+        const fact = await db[kind].create({ data: { text: 'Foreign synthetic fact', sourceMessageId: message.id } });
+        assert.equal((await api('/' + kind + 's/' + fact.id)).status, 404); await db[kind].delete({ where: { id: fact.id } });
+      }
+    } finally { await db.emailMessage.delete({ where: { id: message.id } }); await db.mailAccount.delete({ where: { id: foreign.id } }); }
+  });
   await test('M10 summary versions, rollback and project stage audit', async () => {
     const first = await summaries.applyAnalysisSummary(analysis.id, { operationId: 'summary-one', entityType: 'project', entityId: project.id, expectedVersion: 0 });
     const before = await db.task.findMany({ orderBy: { id: 'asc' } });
