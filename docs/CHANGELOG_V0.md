@@ -49,7 +49,7 @@ V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代�
 - 验证：隔离集成 53/53、修复 17/17、Dashboard 23/23、同步 17/17、租约 9/9；构建/类型/Prisma 与契约通过。
 - 本机部署健康；旧备份完成本机隔离恢复/计数核对，正文导航做真实浏览器及局部手机检查；定向清理缓存约 4.595 GB。
 - 真实引用边界、完整手机/通知与离机恢复仍待验；首次 Docker 不可用的开发检查不冒充后续验收。
-- 证据：[修复与升级原文](https://github.com/HeiYingQWQ/sc-mail/blob/68eda89/docs/REVIEW_FIXES_2026-10-01.md)、[启动验收](https://github.com/HeiYingQWQ/sc-mail/blob/68eda89/docs/ACCEPTANCE_2026-10-01.md)、[缓存证据](verification/cleanup-cache-2026-10-01.json)。
+- 证据：[修复与升级原文](https://github.com/HeiYingQWQ/sc-mail/blob/68eda89/docs/REVIEW_FIXES_2026-10-01.md)、[启动验收](https://github.com/HeiYingQWQ/sc-mail/blob/68eda89/docs/ACCEPTANCE_2026-10-01.md)；原本机缓存附件当前不可用。
 
 ## V0.6.0 · 手动 CRM 与项目 AI（2026-10-02）
 - 停止自动建联系人；多邮箱、公司/项目成员、生命周期、往来查询、人工归属、批次分析及派生摘要/建议接入共享工具。
@@ -57,14 +57,14 @@ V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代�
 - 验证：Dashboard 42/42、契约 69 次、CRM 隔离数据库与 backend 53/53；项目分析 26 jobs/112 fake Provider 调用，3 个合成模型 smoke。
 - 隔离浏览器覆盖多邮箱、两个项目、9 封逻辑邮件和摘要覆盖 4/4；本机部署迁移 26，升级前后邮件与原文总量相同。
 - 完整备份通过 TOC/哈希检查但未恢复；当时新工具未完全授权，内联复核浏览器和真实项目通知仍待验。
-- 证据：[独立扩展原文](https://github.com/HeiYingQWQ/sc-mail/blob/68eda89/docs/ACCEPTANCE_MANUAL_CRM_PROJECT_AI_2026-10-02.md)、[合成概览](assets/manual-crm-fixture-2026-10-02.png)。
+- 证据：[独立扩展原文](https://github.com/HeiYingQWQ/sc-mail/blob/68eda89/docs/ACCEPTANCE_MANUAL_CRM_PROJECT_AI_2026-10-02.md)；原本机合成概览截图附件当前不可用。
 
 ## V0.7.0 · 投递报告与系统发件地址（2026-10-02）
 - 新增按业务日/DST 聚合投递报告、明确失败地址与未知目标、精确系统发件地址管理及优先静默 guard；不从 To 猜失败对象。
 - 验证：Dashboard 49/49、契约 77 次、系统发件地址 8 组隔离用例、项目分析 28 jobs/113 fake Provider 调用；backend 53/53 等回归记录通过。
 - 本机部署迁移 27，升级前后邮件/原文总量相同；真实报告 API 与桌面页、合成地址增删/DST/逻辑去重通过。
 - 新备份仅 TOC/哈希核对，未恢复；375px DOM 无横向溢出不等于完整移动端视觉，4 个宿主工具仍未授权。
-- 证据：[投递扩展原文](https://github.com/HeiYingQWQ/sc-mail/blob/68eda89/docs/ACCEPTANCE_MANUAL_CRM_PROJECT_AI_2026-10-02.md)、[合成报告页](assets/delivery-reports-fixture-2026-10-02.png)。
+- 证据：[投递扩展原文](https://github.com/HeiYingQWQ/sc-mail/blob/68eda89/docs/ACCEPTANCE_MANUAL_CRM_PROJECT_AI_2026-10-02.md)；原本机合成报告截图附件当前不可用。
 
 ## V0.8.0 · 项目详情分区（2026-10-02）
 - 项目详情扩大并分为概览/邮件往来/分析记录，依据及动态折叠，分页刷新保留分区，关闭或跳转清除专用宽度。
@@ -137,3 +137,12 @@ V0.0.1–V0.9.4 是本次按开发材料回溯编排的里程碑编号，不代�
 - 合成浏览器检查 17 个导航页在 320/390/768/1280px 无页面级横向溢出；长地址详情、旧项目归入及非项目锁定完成，取消时 0 写入，完成后 2 条操作审计、0 条通知，旧项目保持结束。
 - 未合并/部署或接生产邮箱、真实通知；真机、200% 缩放、辅助技术和规模/长期弱网仍待验证；CI 与独立审核结论按本次 PR 最新 SHA 核对。
 - 证据：[Dashboard 回归](../scripts/verify-dashboard.cjs)、[隔离集成](../scripts/acceptance.cjs)、[合成 fixture](../scripts/ui-crm-acceptance.cjs)、[复核与网络操作](OPERATIONS.md#复核确认与慢网络)。
+
+## V0.9.11 · 本机 OpenClaw 与模型配置维护（2026-11-03）
+- 本机 OpenClaw 从 2026.9.6 升至官方稳定版 2026.10.9，固定镜像 digest；先停机备份状态/环境文件，再由官方入口完成会话库迁移，保留同一状态卷与回环端口。
+- 按用户授权移除旧模型提供商/认证与菜单/策略/回退，默认及 ai-mail、ai-mail-notify 仅使用用户指定兼容端点的 gpt-6.1-sol；密钥只在私有环境与凭据存储，配置保留环境引用。
+- Compose 增加 OPENCLAW_IMAGE 覆盖入口，默认兼容镜像不变；补齐现有安装升级、模型配置作用域及配套状态快照回退说明，不新增产品业务能力。
+- 实测新镜像版本、Schema 校验、健康/零重启、两个 Agent 的精确模型解析与单一允许列表；会话元数据无模型覆盖，历史记录保留。合成文本和 Responses 函数调用通过，初次工具探测上游 502 后复验成功。
+- MCP doctor ai-mail:ok，sc-mail Skill eligible/modelVisible:true；工具/绑定/hook/WhatsApp/非模型 Agent 设置保持一致；官方迁移显式启用 memory-core 并生成内置 Skill 配置。
+- 已备份约 104 MB 状态与原环境文件；未发送真实测试通知、未查询邮件正文或删除记忆；手机/业务 E2E、长期稳定性及状态恢复演练未执行，运行健康需实时查询。
+- 证据：[官方发布](https://github.com/openclaw/openclaw/releases/tag/v2026.10.9)、[Compose](../openclaw-stack/compose.yml)、[现有安装维护](AGENT_INTEGRATION.md#现有-docker-安装升级与模型维护)。

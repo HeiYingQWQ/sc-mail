@@ -1,6 +1,6 @@
 services:
   openclaw-gateway:
-    image: ghcr.io/openclaw/openclaw:2026.9.6
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:2026.9.6}
     restart: unless-stopped
     init: true
     env_file:
@@ -43,7 +43,7 @@ services:
     command: ["node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789"]
 
   openclaw-cli:
-    image: ghcr.io/openclaw/openclaw:2026.9.6
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:2026.9.6}
     network_mode: "service:openclaw-gateway"
     env_file:
       - .env
