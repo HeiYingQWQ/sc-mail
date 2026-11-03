@@ -1,6 +1,6 @@
 # SC Mail
 
-当前开发进度 **V0.9.10**。独立商务邮件服务：TypeScript/NestJS、PostgreSQL、Prisma、pg-boss、自建 IMAP。产品及 Dashboard 使用 SC Mail；`ai-mail` CLI/API/Agent 标识保留兼容。首版不自动向客户发信。
+当前开发进度 **V0.9.11**。独立商务邮件服务：TypeScript/NestJS、PostgreSQL、Prisma、pg-boss、自建 IMAP。产品及 Dashboard 使用 SC Mail；`ai-mail` CLI/API/Agent 标识保留兼容。首版不自动向客户发信。
 
 ## 当前能力
 

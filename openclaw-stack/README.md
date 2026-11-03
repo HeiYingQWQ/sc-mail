@@ -1,6 +1,6 @@
 # OpenClaw 桥接目录
 
-独立 Compose 项目，镜像固定 2026.9.6，Gateway 端口只绑定回环地址，保留独立状态卷。不要挂载宿主 Docker socket；停止保留状态，不用 down -v。SC Mail 的 API/CLI/MCP/Agent 标识 ai-mail 为兼容名称。
+独立 Compose 项目，默认兼容镜像 2026.9.6；本机可在被忽略的 `.env` 中用 `OPENCLAW_IMAGE` 固定版本/tag 与 digest，Gateway/CLI 共用该值。Gateway 端口只绑定回环地址，保留独立状态卷。不要挂载宿主 Docker socket；停止保留状态，不用 down -v。SC Mail 的 API/CLI/MCP/Agent 标识 ai-mail 为兼容名称。
 
 `openclaw_state` 挂载 `/home/node/.openclaw`，保存配置、workspace、会话和凭据。Compose 不再声明旧 openclaw_auth 卷；已有安装只有在确认旧卷为空且没有其他容器使用时才可删除，不要按名称批量删除卷。
 

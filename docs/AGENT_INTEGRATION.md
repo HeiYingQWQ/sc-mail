@@ -1,6 +1,6 @@
 # SC Mail 对接 OpenClaw：原理与本机教程
 
-> 适用范围：本仓库的 Docker Desktop 部署，以及 `openclaw-stack/compose.yml` 固定的 OpenClaw 镜像版本 `2026.9.6`。操作针对仓库固定版本；当前部署/验收状态见 [README](../README.md)，不能从本文推断服务正在运行。产品名称是 **SC Mail**；Skill 标题为 **SC-Mail**，加载标识为 `sc-mail`；现有 `ai-mail` Agent、MCP、CLI 和 API 路径仍为兼容性标识。
+> 适用范围：本仓库的 Docker Desktop 部署，`openclaw-stack/compose.yml` 默认兼容镜像为 `2026.9.6`，可用私有 `.env` 的 `OPENCLAW_IMAGE` 覆盖。以下初装步骤针对默认版本；已有安装升级见下节，历史结果见版本日志，实时健康需查询。产品名称是 **SC Mail**；Skill 标题为 **SC-Mail**，加载标识为 `sc-mail`；现有 `ai-mail` Agent、MCP、CLI 和 API 路径仍为兼容性标识。
 
 服务器上的 OpenClaw 自配置步骤另见 [SC-Mail OpenClaw 部署 Skill](../skills/sc-mail-openclaw-deploy/SKILL.md)。它需要独立部署 Agent 的 shell、Docker 和配置文件访问权限；`ai-mail` 运行 Agent 可使用个人助手和业务工具，但没有部署 shell，安装 Skill 不会赋予这些权限。
 
@@ -95,6 +95,20 @@ node openclaw-stack/enable-events.mjs
 ```
 
 两个辅助脚本分别写入通知发送 URL、事件回调 URL 和共享 hook 密钥；不会发送测试消息，也不会删除邮件数据。`configure-mcp.mjs` 注册 `/hooks/ai-mail-event`，并配置单独的 `ai-mail-notify` 转发 Agent。通知 Agent 只允许最小工具集，不持有邮件业务 MCP 工具。配置完后可在 SC Mail Dashboard“系统状态”查看事件唤醒、通知 sender 与队列状态。
+
+### 现有 Docker 安装升级与模型维护
+
+先核实官方稳定版及镜像 tag/digest，在停 Gateway 后备份完整 `openclaw_state` 卷和私有 `.env`。仅在本机 `.env` 设置 `OPENCLAW_IMAGE`，Gateway/CLI 必须使用相同版本；保留原项目名、卷、端口、hook、配对及权限，不重复执行初始化或扩大权限的 helper。使用同一 `$oc` 参数拉取并启动镜像：
+
+```powershell
+& $dc @oc pull openclaw-gateway openclaw-cli
+& $dc @oc stop openclaw-gateway
+& $dc @oc up --detach --no-deps openclaw-gateway
+```
+
+新镜像的官方入口会独占执行 Doctor/状态迁移；不要让旧 CLI 与新 Gateway 同时写状态，不用旧二进制直接打开已迁移数据库回退。回退需原镜像与升级前整份状态快照配套。启动后核实版本、容器健康、CLI 配置校验及原 MCP/Skill 接入；旧 Control UI 可能拒绝连接，需要刷新页面。参见 [官方容器升级说明](https://docs.openclaw.ai/install/docker#upgrading-container-images)。
+
+只有用户明确要求时才替换模型。模型密钥保留在私有 `.env`，持久配置使用环境引用；先用无业务内容的请求核实目录中的精确模型 ID、Responses 和函数调用。切换前保存配置并通过匹配版本的 `models auth list/logout` 清理授权范围内的旧模型凭据，同时核对 `models.providers`、默认模型、每个 Agent 的 `model/models/modelPolicy.allow` 及回退列表；只改全局默认可能留下 Agent 旧菜单或旧模型覆盖。Gateway 运行时使用其匹配版本的 `config patch` 等受支持命令，不直接并发改数据库。历史会话中的模型名称是历史元数据，不应为清理模型而删除对话、私人记忆或 WhatsApp 凭据。无业务内容的模型探测不代替真实手机/通知验收。
 
 ## 3. 事件和投递的验收
 
