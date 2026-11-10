@@ -478,3 +478,8 @@
   .recovery-panel .toolbar select { width: 100%; }
   .recovery-record .action-row { flex-wrap: wrap; }
 }
+.notification-trace-details { overflow-wrap: anywhere; }
+.notification-trace-details summary { width: fit-content; padding-block: 8px; color: var(--blue); cursor: pointer; }
+.notification-trace-details summary:focus-visible { outline: 3px solid #557fc8; outline-offset: 2px; }
+.notification-trace-event { border-block-start: 1px solid var(--line); margin-block-start: 10px; padding-block-start: 10px; }
+.notification-trace .button { margin-block-start: 4px; }

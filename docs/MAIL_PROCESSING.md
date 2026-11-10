@@ -20,6 +20,7 @@
 - CLI: `ai-mail sender-rules`, `ai-mail sender-rule-set <blacklist|whitelist> <address|domain> <pattern> <actor-id> <operation-id>`, `ai-mail sender-rule-delete <rule-id> <actor-id> <operation-id>`.
 - MCP: `list_sender_rules`, `set_sender_rule`, `delete_sender_rule`.
 - Dashboard: 管理 → 发件人规则。页面提示规则优先级及未来生效范围，并建议对白名单优先使用邮箱地址，以免放行同域机器发件人。
+- Dashboard: 邮件详情 → 提醒判断。展开后可查看已保存的规则、分类/意图证据、Agent 与 WhatsApp 状态。规则直接分流或升级前的记录可能没有意图。重新读取只刷新记录，不重跑模型或重发通知。
 - Generic Agent guidance: `skills/sc-mail/SKILL.md`. OpenClaw's event prompt requires one concise Simplified Chinese WhatsApp request for a whitelisted human event with `notificationRequired=true`, or for a non-whitelisted high/urgent human-mail candidate the Agent judges to require our reply or business action. `payloadJson.notificationRequired=false` leaves an Agent decision; `result.actionable=false` forbids a non-whitelisted notice. Clear refusals without follow-up remain silent. Channel/recipient allowlists remain authoritative; a rejected qualifying notice leaves a visible failed event. Completed old events are not replayed automatically after a prompt update.
 
 ### Completion decision and verification
@@ -27,6 +28,8 @@
 A non-whitelisted inbound human event requires boolean `result.actionable`: true must include an allowed notification; false must be silent. `payloadJson.notificationRequired=false` or absent leaves an Agent decision to make; it is not the same field as `result.actionable=false`. A whitelist-required human notice cannot be downgraded. A rejected qualifying request must remain a visible failure.
 
 Importance routing uses validated actionable intent: a confident action request is classified high (urgent stays urgent); a high score without actionable intent stays quiet. This is not a score-only filter. Initial imports retain the durable historical flag and remain silent through reconciliation/recovery.
+
+如果客户拒绝原方案但要求新报价，或确认收件时提出新要求，以本封邮件的有效请求为准。单纯拒绝、已取消的请求、引用旧邮件中的截止时间不单独构成行动依据。低置信度或证据无法核对时进入复核。
 
 项目通知是独立原因，不能因无需行动取消；服务端重验版本、项目状态和成员上下文，详见 [事件与通知](API_REFERENCE.md#事件与通知)。
 

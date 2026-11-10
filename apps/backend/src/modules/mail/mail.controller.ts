@@ -137,6 +137,12 @@ export class MailController {
     return this.brief.getEmailMessage(messageId);
   }
 
+  @Get('messages/by-id/:messageId/notification-trace')
+  async getImportedMessageNotificationTrace(@Param('messageId') messageId: string, @Headers('authorization') authorization?: string): Promise<unknown> {
+    await this.authorize(authorization);
+    return this.brief.getNotificationTrace(messageId);
+  }
+
   @Get('threads/:threadId')
   async getThread(
     @Param('threadId') threadId: string,

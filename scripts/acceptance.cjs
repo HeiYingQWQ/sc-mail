@@ -323,6 +323,11 @@ async function main() {
     assert.equal(whitelisted.senderRuleSnapshot.action, 'whitelist');
     assert.equal(await db.emailImportanceTriage.findUnique({ where: { sourceMessageId: whitelisted.id } }), null);
     assert.equal(await db.agentEvent.count({ where: { entityId: whitelisted.id } }), 0);
+    for (const [message, rule, hint] of [[blocked, 'blacklist', 'sender_blacklist'], [whitelisted, 'whitelist', 'filtered_classification']]) {
+      const { status, body } = await api(`/messages/by-id/${message.id}/notification-trace`);
+      assert.equal(status, 200); assert.equal(body.senderRule, rule); assert.equal(body.routingHint, hint);
+      assert.equal(body.triage, null); assert.deepEqual(body.events, []);
+    }
     assert.equal((await messageFor(whiteOoo)).classification, 'OUT_OF_OFFICE');
     assert.equal((await messageFor(whiteTicket)).classification, 'TICKET_CONFIRMATION');
     for (const wire of [whiteOoo, whiteTicket]) assert.equal(await db.agentEvent.findFirst({ where: { entityId: (await messageFor(wire)).id } }), null);
@@ -468,32 +473,57 @@ async function main() {
   await test('M20 only actionable high or urgent mail creates an individual event', async () => {
     const routine = mail('client@customer.test', 'Weekly project update', 'The installation is proceeding as planned; no action is needed.');
     const urgent = mail('client@customer.test', 'Production halted today', 'Production line is stopped. Please call us now to resolve the issue.');
-    const refusal = mail('partners@vigx.example', 'Re: CES 2027 booth support', 'Dear Leonardo, Thank you for reaching out and for your interest in supporting VIGX at CES 2027. We appreciate the introduction to Space Concept and your turnkey exhibition services. At this time, we are not reviewing booth design or build partners, but we will keep your information on file should our needs change. Thank you again for your message. Warm regards, The VIGX Team');
+    const refusal = mail('partners@refusal.invalid', 'Re: booth support', 'Thanks for the offer. We are not reviewing booth design or build partners and will keep your details on file.');
+    const revised = mail('client@intent.invalid', 'Re: revised quote', 'We decline option A. Please send a new quote for option B.');
+    const ackWithDeadline = mail('client@intent.invalid', 'Re: drawing received', 'Thanks, we received the drawing. Please confirm the new dimensions by Friday.');
+    const withdrawn = mail('client@intent.invalid', 'Re: file request', 'Please disregard my earlier request. We no longer need the files.\n\n> Please send the files by 9 a.m.');
+    const ambiguous = mail('client@intent.invalid', 'Re: new date', 'Thanks. We might need to revisit the timeline after the call.');
     const before = await db.agentEvent.count({ where: { eventType: 'INBOUND_EMAIL_RECEIVED' } });
-    await persist([routine, urgent, refusal], { incremental: true, emitAgentEvents: true });
+    await persist([routine, urgent, refusal, revised, ackWithDeadline, withdrawn, ambiguous], { incremental: true, emitAgentEvents: true });
     assert.equal(await db.agentEvent.count({ where: { eventType: 'INBOUND_EMAIL_RECEIVED' } }), before);
     importanceResults = [
       triageResult('normal', 'routine', 'no action is needed'),
       triageResult('urgent', 'important_change', 'Production line is stopped.'),
       triageResult('high', 'non_actionable', 'not reviewing booth design or build partners', { reason: 'The sender declined and requested no follow-up.' }),
+      triageResult('high', 'customer_inquiry', 'Please send a new quote for option B.'),
+      triageResult('high', 'deadline', 'Please confirm the new dimensions by Friday.'),
+      triageResult('low', 'non_actionable', 'We no longer need the files.'),
+      triageResult('uncertain', 'uncertain', 'might need to revisit the timeline', { confidence: 0.5, review_required: true }),
     ];
-    const processed = await importanceTriage.processBatch(5);
-    assert.equal(processed.quiet, 2); assert.equal(processed.urgent, 1);
+    const processed = await importanceTriage.processBatch(7);
+    assert.equal(processed.quiet, 3); assert.equal(processed.urgent, 1); assert.equal(processed.high, 2); assert.equal(processed.review, 1);
     const routineMessage = await messageFor(routine); const urgentMessage = await messageFor(urgent); const refusalMessage = await messageFor(refusal);
     assert.equal((await db.emailImportanceTriage.findUniqueOrThrow({ where: { sourceMessageId: routineMessage.id } })).status, 'quiet');
     assert.equal((await db.emailImportanceTriage.findUniqueOrThrow({ where: { sourceMessageId: urgentMessage.id } })).status, 'urgent');
     const refusalTriage = await db.emailImportanceTriage.findUniqueOrThrow({ where: { sourceMessageId: refusalMessage.id } });
     assert.equal(refusalTriage.status, 'quiet'); assert.equal(refusalTriage.importance, 'low');
     assert.equal(await db.agentEvent.findFirst({ where: { entityId: refusalMessage.id, eventType: 'INBOUND_EMAIL_RECEIVED' } }), null);
-    assert.equal(await db.agentEvent.count({ where: { eventType: 'INBOUND_EMAIL_RECEIVED' } }), before + 1);
+    assert.equal(await db.agentEvent.count({ where: { eventType: 'INBOUND_EMAIL_RECEIVED' } }), before + 3);
     const event = await db.agentEvent.findFirstOrThrow({ where: { entityId: urgentMessage.id } });
     assert.equal(event.priority, 10); assert.equal(event.payloadJson.importance, 'urgent');
     assert.equal(event.payloadJson.triageSource, 'realtime'); assert.equal(event.payloadJson.receivedAt, urgentMessage.receivedAt.toISOString());
     assert.equal(event.payloadJson.recoveredDuringReconciliation, false);
     const auditedTriage = await db.emailImportanceTriage.findUniqueOrThrow({ where: { sourceMessageId: urgentMessage.id } });
-    assert.equal(auditedTriage.promptVersion, 'm20.3'); assert.equal(auditedTriage.schemaVersion, '1');
+    assert.equal(auditedTriage.promptVersion, 'm20.4'); assert.equal(auditedTriage.schemaVersion, '1');
     assert.match(importancePrompt, /untrusted data/);
     assert.match(importancePrompt, /clear refusal/i);
+    for (const [message, intent, hint] of [
+      [routineMessage, 'routine', 'triage_quiet'],
+      [refusalMessage, 'non_actionable', 'triage_quiet'],
+      [urgentMessage, 'important_change', 'event_recorded'],
+      [await messageFor(revised), 'customer_inquiry', 'event_recorded'],
+      [await messageFor(ackWithDeadline), 'deadline', 'event_recorded'],
+      [await messageFor(withdrawn), 'non_actionable', 'triage_quiet'],
+      [await messageFor(ambiguous), 'uncertain', 'triage_review'],
+    ]) {
+      const { status, body } = await api(`/messages/by-id/${message.id}/notification-trace`);
+      assert.equal(status, 200); assert.equal(body.triage.intent, intent); assert.equal(body.routingHint, hint);
+      assert.equal(body.events.length, hint === 'event_recorded' ? 1 : 0);
+      if (body.events.length) {
+        assert.equal(body.events[0].wakeup.status, 'pending');
+        assert.deepEqual(body.events[0].deliveries, []);
+      }
+    }
   });
   await test('M19 event creation rechecks current noise and manual classification under the transaction lock', async () => {
     const noiseRace = mail('client@customer.test', 'Potential customer matter', 'Please send the current quote.');
@@ -620,6 +650,7 @@ async function main() {
     assert.equal(record.status, 'review');
     assert.equal(record.importance, 'uncertain');
     assert.equal(record.lastErrorCode, 'TRIAGE_EVIDENCE_NOT_VERIFIABLE');
+    assert.equal(record.intent, null);
     assert.deepEqual(record.evidenceJson, []);
     assert.equal(await db.agentEvent.count({ where: { entityId: message.id } }), 0);
     const reviewListing = await api('/importance-triage?status=review&limit=100');
@@ -1625,6 +1656,58 @@ async function main() {
     assert.equal((await projects.getProject(a.id)).waitingOn, 'none'); assert.equal((await projects.getProject(a.id)).replyRequired, false); assert.equal((await projects.getProject(b.id)).replyRequired, true);
     task = await records.updateTask(task.id, { operationId: 'review-detach', expectedVersion: task.version, projectId: null, topicId: null });
     assert.equal(task.projectId, null); assert.equal((await projects.getProject(b.id)).waitingOn, 'none'); assert.equal((await projects.getProject(b.id)).replyRequired, false);
+  });
+
+  await test('Notification trace is read-only, scoped to the mailbox, and separates wakeup from WhatsApp delivery', async () => {
+    const tracePath = id => `/messages/by-id/${id}/notification-trace`;
+    const copyData = {
+      mailbox: 'TraceCopies', uidValidity: 1n, providerMessageId: 'trace-copy', direction: 'inbound',
+      rfcMessageId: ' <trace@acceptance.invalid> ', classification: 'BUSINESS_HUMAN', reviewRequired: false,
+      fromJson: [], toJson: [], ccJson: [], bccJson: [], headersJson: {}, rawSource: Buffer.from('fixture'),
+    };
+    const message = await db.emailMessage.create({ data: { ...copyData, uid: 2, providerMessageId: 'trace-original', rfcMessageId: copyData.rfcMessageId.trim(), mailAccountId: account.id } });
+    const copy = await db.emailMessage.create({ data: { ...copyData, uid: 1, mailAccountId: account.id, createdAt: new Date(message.createdAt.getTime() + 1000) } });
+    const other = await db.mailAccount.create({ data: { email: 'other@trace.invalid', host: 'imap.trace.invalid', port: 993, tlsMode: 'implicit', username: 'other@trace.invalid', passwordCiphertext: 'fixture' } });
+    const foreign = await db.emailMessage.create({ data: { ...copyData, uid: 1, mailAccountId: other.id, createdAt: new Date(0) } });
+    assert.equal((await api(tracePath(copy.id), 'GET', undefined, 'invalid-token')).status, 401);
+    assert.equal((await api(tracePath(foreign.id))).status, 404);
+    assert.equal((await api(tracePath(copy.id))).body.routingHint, 'not_recorded');
+    const legacy = await db.emailImportanceTriage.create({
+      data: { sourceMessageId: message.id, mailAccountId: account.id, status: 'quiet', importance: 'low' },
+    });
+    const traceOnly = await db.agentEvent.create({ data: {
+      eventKey: 'acceptance-notification-trace', eventType: 'INBOUND_EMAIL_RECEIVED', entityType: 'email_message', entityId: message.id,
+      status: 'completed', payloadJson: { notificationReasons: ['active_project_update', 'private-fixture'], projectProjectRouteStale: true },
+      resultJson: { actionable: false, internal: 'private-fixture' },
+      wakeupDelivery: { create: { status: 'delivered', deliveredAt: now } },
+    } });
+    await db.agentEvent.create({ data: {
+      eventKey: 'acceptance-foreign-trace', eventType: 'INBOUND_EMAIL_RECEIVED', entityType: 'email_message', entityId: foreign.id,
+      status: 'completed', payloadJson: { notificationReasons: ['sender_whitelist'] },
+    } });
+    for (const [channel, status, lastError, offset] of [
+      ['whatsapp', 'delivered', null, 1],
+      ['whatsapp', 'unknown', 'OPENCLAW_WHATSAPP_DELIVERY_UNCONFIRMED', 2],
+      ['whatsapp', 'failed', 'private-fixture free-form transport response', 3],
+      ['telegram', 'delivered', null, 4],
+    ]) {
+      await db.notificationDelivery.create({ data: {
+        requestKey: `trace-${offset}`, requestHash: 'private-fixture', channel, recipientRef: 'private-fixture', content: 'private-fixture',
+        eventId: traceOnly.id, status, lastError, createdAt: new Date(now.getTime() + offset),
+      } });
+    }
+    const { status, body } = await api(tracePath(copy.id));
+    assert.equal(status, 200); assert.equal(body.messageId, copy.id); assert.equal(body.triage.intent, null);
+    assert.equal(body.triage.fromCanonicalCopy, true); assert.equal(body.events.length, 1);
+    const event = body.events[0];
+    assert.equal(event.fromCanonicalCopy, true); assert.equal(event.actionable, false); assert.equal(event.projectRouteStale, true);
+    assert.deepEqual(event.reasons, ['active_project_update']); assert.equal(event.wakeup.status, 'delivered');
+    assert.deepEqual(event.deliveries.map(({ status, errorCode }) => [status, errorCode]), [
+      ['failed', 'DETAIL_UNAVAILABLE'], ['unknown', 'OPENCLAW_WHATSAPP_DELIVERY_UNCONFIRMED'], ['delivered', null],
+    ]);
+    assert.doesNotMatch(JSON.stringify(body), /private-fixture|recipientRef|requestKey|telegram/);
+    assert.deepEqual(await db.emailImportanceTriage.findUniqueOrThrow({ where: { id: legacy.id } }), legacy);
+    assert.equal(await db.notificationDelivery.count({ where: { eventId: traceOnly.id } }), 4);
   });
 
 }

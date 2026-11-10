@@ -186,6 +186,7 @@ model EmailImportanceTriage {
   source            String       @default("realtime")
   status            String       @default("pending")
   importance        String?
+  intent            String?
   confidence        Float?
   reason            String?
   evidenceJson      Json         @default("[]")
