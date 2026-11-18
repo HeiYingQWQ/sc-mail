@@ -1667,16 +1667,18 @@ async function main() {
     };
     const message = await db.emailMessage.create({ data: { ...copyData, uid: 2, providerMessageId: 'trace-original', rfcMessageId: copyData.rfcMessageId.trim(), mailAccountId: account.id } });
     const copy = await db.emailMessage.create({ data: { ...copyData, uid: 1, mailAccountId: account.id, createdAt: new Date(message.createdAt.getTime() + 1000) } });
+    const third = await db.emailMessage.create({ data: { ...copyData, uid: 3, providerMessageId: 'trace-third', mailAccountId: account.id, createdAt: new Date(message.createdAt.getTime() + 2000) } });
     const other = await db.mailAccount.create({ data: { email: 'other@trace.invalid', host: 'imap.trace.invalid', port: 993, tlsMode: 'implicit', username: 'other@trace.invalid', passwordCiphertext: 'fixture' } });
     const foreign = await db.emailMessage.create({ data: { ...copyData, uid: 1, mailAccountId: other.id, createdAt: new Date(0) } });
     assert.equal((await api(tracePath(copy.id), 'GET', undefined, 'invalid-token')).status, 401);
     assert.equal((await api(tracePath(foreign.id))).status, 404);
     assert.equal((await api(tracePath(copy.id))).body.routingHint, 'not_recorded');
     const legacy = await db.emailImportanceTriage.create({
-      data: { sourceMessageId: message.id, mailAccountId: account.id, status: 'quiet', importance: 'low' },
+      data: { sourceMessageId: copy.id, mailAccountId: account.id, status: 'high', importance: 'high' },
     });
+    assert.equal((await api(tracePath(third.id))).body.routingHint, 'triage_candidate_no_event');
     const traceOnly = await db.agentEvent.create({ data: {
-      eventKey: 'acceptance-notification-trace', eventType: 'INBOUND_EMAIL_RECEIVED', entityType: 'email_message', entityId: message.id,
+      eventKey: 'acceptance-notification-trace', eventType: 'INBOUND_EMAIL_RECEIVED', entityType: 'email_message', entityId: copy.id,
       status: 'completed', payloadJson: { notificationReasons: ['active_project_update', 'private-fixture'], projectProjectRouteStale: true },
       resultJson: { actionable: false, internal: 'private-fixture' },
       wakeupDelivery: { create: { status: 'delivered', deliveredAt: now } },
@@ -1696,11 +1698,12 @@ async function main() {
         eventId: traceOnly.id, status, lastError, createdAt: new Date(now.getTime() + offset),
       } });
     }
-    const { status, body } = await api(tracePath(copy.id));
-    assert.equal(status, 200); assert.equal(body.messageId, copy.id); assert.equal(body.triage.intent, null);
+    const { status, body } = await api(tracePath(third.id));
+    assert.equal(status, 200); assert.equal(body.messageId, third.id); assert.equal(body.triage.intent, null);
     assert.equal(body.triage.fromCanonicalCopy, true); assert.equal(body.events.length, 1);
     const event = body.events[0];
     assert.equal(event.fromCanonicalCopy, true); assert.equal(event.actionable, false); assert.equal(event.projectRouteStale, true);
+    assert.equal(event.notificationOutcome, 'recorded');
     assert.deepEqual(event.reasons, ['active_project_update']); assert.equal(event.wakeup.status, 'delivered');
     assert.deepEqual(event.deliveries.map(({ status, errorCode }) => [status, errorCode]), [
       ['failed', 'DETAIL_UNAVAILABLE'], ['unknown', 'OPENCLAW_WHATSAPP_DELIVERY_UNCONFIRMED'], ['delivered', null],
@@ -1708,6 +1711,34 @@ async function main() {
     assert.doesNotMatch(JSON.stringify(body), /private-fixture|recipientRef|requestKey|telegram/);
     assert.deepEqual(await db.emailImportanceTriage.findUniqueOrThrow({ where: { id: legacy.id } }), legacy);
     assert.equal(await db.notificationDelivery.count({ where: { eventId: traceOnly.id } }), 4);
+  });
+  await test('Notification trace distinguishes explicit silence, missing required delivery and retry timing', async () => {
+    const wire = mail('client@trace-outcome.invalid', 'Follow-up decision', 'Please confirm the proposed scope.');
+    await persist([wire]);
+    const message = await messageFor(wire);
+    const retryAt = new Date(now.getTime() + 3600000);
+    const event = await db.agentEvent.create({ data: {
+      eventKey: 'acceptance-notification-outcome', eventType: 'INBOUND_EMAIL_RECEIVED', entityType: 'email_message', entityId: message.id,
+      status: 'pending', payloadJson: {}, wakeupDelivery: { create: { status: 'pending', attempts: 2, nextAttemptAt: retryAt, lastError: 'AGENT_WEBHOOK_HTTP_503' } },
+    } });
+    const readEvent = async () => {
+      const { status, body } = await api(`/messages/by-id/${message.id}/notification-trace`);
+      assert.equal(status, 200);
+      return body.events[0];
+    };
+    let trace = await readEvent();
+    assert.equal(trace.eventId, event.id);
+    assert.equal(trace.notificationOutcome, 'not_recorded');
+    assert.deepEqual(trace.wakeup, { status: 'pending', attempts: 2, nextAttemptAt: retryAt.toISOString(), errorCode: 'AGENT_WEBHOOK_HTTP_503', deliveredAt: null });
+    await db.agentEvent.update({ where: { id: event.id }, data: { status: 'completed', resultJson: { actionable: false },
+      payloadJson: { projectNotification: false, projectProjectRouteStale: true } } });
+    assert.equal((await readEvent()).notificationOutcome, 'non_actionable');
+    await db.agentEvent.update({ where: { id: event.id }, data: { payloadJson: { notificationRequired: true } } });
+    assert.equal((await readEvent()).notificationOutcome, 'expected_but_missing');
+    await db.agentWakeupDelivery.update({ where: { eventId: event.id }, data: { status: 'failed', lastError: 'Agent event wakeup retry limit reached' } });
+    trace = await readEvent();
+    assert.equal(trace.wakeup.errorCode, 'AGENT_WAKEUP_RETRY_LIMIT');
+    assert.equal(trace.wakeup.nextAttemptAt, null);
   });
 
 }

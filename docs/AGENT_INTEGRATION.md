@@ -117,7 +117,7 @@ OpenClaw 的 heartbeat、Skill Workshop 和记忆任务属于宿主；维护前�
 | `AI_MAIL_API_TOKEN` 或 `IMAP_API_TOKEN` 缺失 | 这指 **MCP 子进程**没有 API 凭据，与 Dashboard 登录密码无关。先检查两份本地 `.env` 的变量是否存在，重新运行 `configure-mcp.mjs` 并重建 Gateway，再运行 `mcp doctor ai-mail --probe`。配置中的 MCP server 必须保留 `AI_MAIL_API_TOKEN: '${AI_MAIL_API_TOKEN}'` 环境引用；Gateway 环境变量不会自动传给该子进程。不要把 Token 明文写进 `openclaw.json`。 |
 | MCP probe 失败或连接被拒 | 确认 SC Mail `backend` healthy；OpenClaw 容器中的 API 地址应是 `http://host.docker.internal:3000/api/v1`，而非容器自己的 `localhost:3000`。核对 API Token 是否与 SC Mail 的 `IMAP_API_TOKEN` 一致；若曾轮换 Token，安全更新 `openclaw-stack/.env` 后重建 Gateway。 |
 | 能用 MCP 查询，但邮件到达没有唤醒 | MCP 与自动触发是两条配置。检查根目录 `.env` 的 `AGENT_EVENT_WEBHOOK_URL`、`AGENT_WEBHOOK_TOKEN`，OpenClaw hook 配置、Gateway 与 worker 是否重启，并查看“系统状态”的唤醒失败数。机器邮件、普通 low/normal 邮件本就静默。 |
-| 事件完成但手机没收到消息 | 查看 `NotificationDelivery`，确认渠道为 `whatsapp`、号码在 `NOTIFICATION_ALLOWED_RECIPIENTS` 中、`OPENCLAW_WHATSAPP_NOTIFY_URL` 已设置，以及 OpenClaw WhatsApp 已配对。`pending` 或 `unknown` 不等于送达；不要直接从 OpenClaw 再发送一次绕过队列。 |
+| 手机没收到某封邮件的提醒 | 打开邮件详情的「提醒判断」，核对 Agent 结论、唤醒错误及 WhatsApp 记录。若等待投递，检查 `OPENCLAW_WHATSAPP_NOTIFY_URL`、目标 allowlist 和 WhatsApp 配对。缺记录或结果未确认时按 [单封邮件提醒排查](OPERATIONS.md#单封邮件提醒排查) 核实。 |
 | 定时任务在 Control UI 不能修改 | 先核实所有者；system-owned 任务与用户任务维护方式不同，不假定旧固定时刻任务仍存在。日报时间在 SC Mail `.env` 的 `DAILY_BRIEF_TIME` 管理。 |
 
 ## 6. 相关文档与能力限制

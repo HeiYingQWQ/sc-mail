@@ -32,6 +32,14 @@ NotificationDelivery 仅支持 OpenClaw WhatsApp sender。WhatsApp 需要 OPENCL
 
 只在 OpenClaw 明确报告完成且渠道接受时标 delivered；providerDeliveryId 记录 hook runId，非 WhatsApp 消息 ID。结果不明标 unknown 禁止自动重发；delivered 不表示用户已读。更改 Skill/提示不会重放已完成旧事件。
 
+### 单封邮件提醒排查
+
+从邮件详情的「提醒判断」或 `ai-mail request GET /mail/messages/by-id/<id>/notification-trace` 开始。
+
+- 重要性判断待复核或失败时，先看证据和错误，再从 [Dashboard 恢复](#dashboard-恢复与人工复核) 处理；已判为候选但缺少 Agent 事件时核查 worker 和事件队列。
+- 唤醒或 WhatsApp 仍排队时，核对尝试次数、最早可处理时间、HTTP 错误及 worker 状态。唤醒已接收后，继续核对 Agent 是否完成处理。
+- 已完成却缺少应有投递记录时，使用详情中的事件 ID 查询历史。确认符合下方恢复条件后才使用审计脚本。已存在投递记录或投递结果未确认时，核查渠道侧而不重复投递。
+
 ### 受控漏通知恢复
 
 维护脚本 scripts/recover-missed-actionable-event.cjs 只接受明确 event-id 与唯一 operation-id，默认 dry-run。仅严格合格、已完成且 actionable=true 的 high/urgent 真人事件可恢复；检查来源、分流、黑名单与既有通知，拒绝已有投递记录，写 BusinessOperation 审计。

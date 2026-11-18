@@ -64,7 +64,11 @@ GET `/messages/by-id/:messageId`、MCP `get_email_message` 返回最多 8,000 �
 
 GET `/api/v1/mail/messages/by-id/:messageId/notification-trace` 使用邮件详情的鉴权与账户范围。返回 `classification`（分类、理由、证据、人工确认与复核标志）、`senderRule`（已保存的规则动作）、`triage`（状态、意图、重要性、置信度、理由、证据和判断时间）及 `routingHint`（按现有记录生成的简要说明）。旧记录或规则直接分流的记录可能没有意图；`not_recorded` 表示无法确定结果。
 
-`events` 含最近 5 个新收件 Agent 事件，每个事件含记录的触发原因、Agent 判断、唤醒和最近 5 条 WhatsApp 投递记录。标记是否取自同账户的同 RFC Message-ID 规范副本、项目依据是否失效及列表是否截断。唤醒 `delivered` 表示 OpenClaw 接收了请求；WhatsApp `delivered` 表示渠道接受，`unknown` 表示无法确认投递。接口只返回判断摘要、有限证据和安全错误码，读取不会重新判断、唤醒或重发。
+读取范围含本邮件及同账户内所有仍存在、去除首尾空格后 RFC Message-ID 相同的副本，保持大小写敏感。分流优先返回当前邮件的记录，否则返回其他副本中最近更新的一条。`fromCanonicalCopy` 为 true 表示来自另一副本。若已有 high/urgent 判断而找不到事件，`routingHint` 为 `triage_candidate_no_event`。
+
+`events` 含最近 5 个新收件 Agent 事件。每条含排查用 `eventId`、触发原因、Agent 判断、项目依据是否失效、唤醒及最近 5 条 WhatsApp 记录。按历史快照归纳的 `notificationOutcome` 可为 `recorded`（有 WhatsApp 记录）、`expected_but_missing`（已完成且存在明确提醒依据，但无 WhatsApp 记录）、`non_actionable`（Agent 明确无需行动且无已记录的强制提醒依据）或 `not_recorded`（现有数据无法确定）。`eventsTruncated` 和 `deliveriesTruncated` 标明截断。
+
+唤醒和 WhatsApp 行返回 `attempts`、安全的 `errorCode` 以及仅对 `pending` 返回的 `nextAttemptAt`（队列最早可处理时间）。唤醒 `delivered` 表示 OpenClaw 接收了请求。WhatsApp `delivered` 表示渠道接受，`unknown` 表示结果未确认。读取不会重新判断、唤醒或重发。
 
 CLI 可用 `ai-mail request GET /mail/messages/by-id/<id>/notification-trace`。没有专用 MCP 工具。
 

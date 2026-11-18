@@ -20,7 +20,7 @@
 - CLI: `ai-mail sender-rules`, `ai-mail sender-rule-set <blacklist|whitelist> <address|domain> <pattern> <actor-id> <operation-id>`, `ai-mail sender-rule-delete <rule-id> <actor-id> <operation-id>`.
 - MCP: `list_sender_rules`, `set_sender_rule`, `delete_sender_rule`.
 - Dashboard: 管理 → 发件人规则。页面提示规则优先级及未来生效范围，并建议对白名单优先使用邮箱地址，以免放行同域机器发件人。
-- Dashboard: 邮件详情 → 提醒判断。展开后可查看已保存的规则、分类/意图证据、Agent 与 WhatsApp 状态。规则直接分流或升级前的记录可能没有意图。重新读取只刷新记录，不重跑模型或重发通知。
+- Dashboard: 邮件详情 → 提醒判断。展开后可查看规则、分类与意图、Agent 判断、失败原因、尝试次数和队列最早可处理时间。明确无需行动、投递记录缺失和结果未确认各自显示。规则直接分流或升级前的记录可能没有意图。排错见 [单封邮件提醒排查](OPERATIONS.md#单封邮件提醒排查)。
 - Generic Agent guidance: `skills/sc-mail/SKILL.md`. OpenClaw's event prompt requires one concise Simplified Chinese WhatsApp request for a whitelisted human event with `notificationRequired=true`, or for a non-whitelisted high/urgent human-mail candidate the Agent judges to require our reply or business action. `payloadJson.notificationRequired=false` leaves an Agent decision; `result.actionable=false` forbids a non-whitelisted notice. Clear refusals without follow-up remain silent. Channel/recipient allowlists remain authoritative; a rejected qualifying notice leaves a visible failed event. Completed old events are not replayed automatically after a prompt update.
 
 ### Completion decision and verification
@@ -32,6 +32,12 @@ Importance routing uses validated actionable intent: a confident action request 
 如果客户拒绝原方案但要求新报价，或确认收件时提出新要求，以本封邮件的有效请求为准。单纯拒绝、已取消的请求、引用旧邮件中的截止时间不单独构成行动依据。低置信度或证据无法核对时进入复核。
 
 项目通知是独立原因，不能因无需行动取消；服务端重验版本、项目状态和成员上下文，详见 [事件与通知](API_REFERENCE.md#事件与通知)。
+
+### 后续验收优先级
+
+1. 先用经授权的脱敏真实邮件评估分类与意图。样本应覆盖常用语言、单纯拒绝、拒绝后附带新要求、转发与行间回复、旧引文和机器邮件。人工标记应响、应静默或应复核，再分别记录漏提醒、误提醒及复核原因。
+2. 用受控测试邮箱和测试手机验收应响、静默、项目提醒、通道断开及恢复后的表现。记录 Agent、唤醒、投递和手机接收各自的结果。
+3. 根据实际故障再确定批量排查或受控恢复入口。当前单封详情可诊断，系统状态提供队列汇总，既有恢复脚本仅支持特定合格事件。
 
 ## 机器邮件资料
 

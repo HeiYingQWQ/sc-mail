@@ -680,6 +680,7 @@
     triage_review: '重要性判断待复核，尚未记录提醒事件。',
     triage_waiting: '重要性判断仍在队列中。',
     triage_failed: '重要性判断失败，尚未记录提醒事件。',
+    triage_candidate_no_event: '重要性已判为提醒候选，尚未找到 Agent 事件。',
     not_recorded: '未找到提醒事件，无法确定当时的提醒结果。',
   };
   const MAIL_TRACE_INTENTS = {
@@ -692,8 +693,20 @@
   const MAIL_TRACE_EVENTS = { pending: '待处理', processing: '处理中', completed: '已处理', ignored: '已忽略', failed: '处理失败' };
   const MAIL_TRACE_WAKEUPS = { pending: '待唤醒', sending: '唤醒请求发送中', delivered: 'OpenClaw 已接收唤醒', failed: '唤醒失败' };
   const MAIL_TRACE_DELIVERIES = { pending: 'WhatsApp 待投递', sending: 'WhatsApp 投递中', delivered: 'WhatsApp 投递已确认', failed: 'WhatsApp 投递失败', unknown: 'WhatsApp 投递结果未确认' };
+  const MAIL_TRACE_NO_DELIVERY = {
+    expected_but_missing: '按已记录的规则应有 WhatsApp 投递，但未找到记录。',
+    non_actionable: 'Agent 判断无需行动，未找到 WhatsApp 投递记录。',
+    not_recorded: '未找到该事件的 WhatsApp 投递记录。',
+  };
   const MAIL_TRACE_ERRORS = {
     SYSTEM_SENDER_SUPPRESSED: '配置的系统发件人已被过滤。',
+    SOURCE_EMAIL_DELETED: '来源邮件已删除，投递已停止。',
+    PROJECT_NOTIFICATION_STALE: '项目提醒依据已失效，投递已停止。',
+    AGENT_WAKEUP_REQUEUED: '事件尚未处理，已安排再次唤醒。',
+    AGENT_WAKEUP_RETRY_LIMIT: '唤醒已达到重试上限。',
+    AGENT_WAKEUP_LEASE_EXPIRED: '上一次唤醒处理超时。',
+    WHATSAPP_DELIVERY_LEASE_EXPIRED: '投递处理超时，结果未确认，自动重发已停止。',
+    INTEGRATION_REQUEST_FAILED: '无法完成唤醒请求。',
     TRIAGE_SYSTEM_SENDER_SUPPRESSED: '配置的系统发件人已被过滤。',
     TRIAGE_EVIDENCE_NOT_VERIFIABLE: '模型引用未能从原邮件核对。',
     TRIAGE_OUTPUT_SCHEMA_INVALID: '模型返回的判断格式无效。',
@@ -709,7 +722,21 @@
     DETAIL_UNAVAILABLE: '没有可显示的错误详情。',
   };
   function mailTraceError(code) {
+    const http = /^(AGENT_WEBHOOK|OPENCLAW)_HTTP_([1-5]\d\d)$/.exec(code || '');
+    if (http) return ` · ${http[1] === 'AGENT_WEBHOOK' ? '唤醒接口' : 'WhatsApp relay'}返回 HTTP ${http[2]}`;
     return code ? ` · ${MAIL_TRACE_ERRORS[code] || code}` : '';
+  }
+  function mailTraceQueue(item) {
+    const attempts = item.attempts > 0 ? ` · 已尝试 ${item.attempts} 次` : '';
+    const eligibleAt = item.nextAttemptAt ? ` · 最早可处理时间 ${formatDate(item.nextAttemptAt)}` : '';
+    return `${attempts}${eligibleAt}${mailTraceError(item.errorCode)}`;
+  }
+  function mailTraceDeliverySummary(event) {
+    const count = event.deliveries.length;
+    if (!count) return MAIL_TRACE_NO_DELIVERY[event.notificationOutcome] || MAIL_TRACE_NO_DELIVERY.not_recorded;
+    if (count === 1) return MAIL_TRACE_DELIVERIES[event.deliveries[0].status] || 'WhatsApp 状态未识别';
+    const labels = [...new Set(event.deliveries.map(item => MAIL_TRACE_DELIVERIES[item.status] || 'WhatsApp 状态未识别'))];
+    return `${event.deliveriesTruncated ? '最近 ' : ''}${count} 条 WhatsApp 记录（${labels.join('、')}）`;
   }
   function appendMailTraceEvidence(root, reason, evidence) {
     if (reason) root.append(el('p', 'small-text', reason));
@@ -718,14 +745,16 @@
   function renderMailTrace(root, announcement, trace) {
     const events = trace.events;
     const latest = events[0];
-    const delivery = latest?.deliveries[0];
     const wakeup = latest?.wakeup && MAIL_TRACE_WAKEUPS[latest.wakeup.status];
-    announcement.textContent = latest
-      ? (delivery ? MAIL_TRACE_DELIVERIES[delivery.status] || 'WhatsApp 状态未识别'
-        : `Agent ${MAIL_TRACE_EVENTS[latest.status] || '状态未识别'}${wakeup ? ` · ${wakeup}` : ''} · 未找到该事件的 WhatsApp 记录`)
-      : MAIL_TRACE_HINTS[trace.routingHint] || MAIL_TRACE_HINTS.not_recorded;
+    if (latest) {
+      const stages = latest.deliveries.length ? '' : `Agent ${MAIL_TRACE_EVENTS[latest.status] || '状态未识别'}${wakeup ? ` · ${wakeup}` : ''} · `;
+      announcement.textContent = `${events.length > 1 ? '最新事件 · ' : ''}${stages}${mailTraceDeliverySummary(latest)}`;
+    } else {
+      announcement.textContent = MAIL_TRACE_HINTS[trace.routingHint] || MAIL_TRACE_HINTS.not_recorded;
+    }
 
     const details = el('details', 'notification-trace-details');
+    details.open = root.querySelector('details')?.open === true;
     details.append(el('summary', '', '查看判断依据'));
     const classification = trace.classification;
     const rule = { blacklist: '命中黑名单', whitelist: '命中白名单', none: '未命中规则' }[trace.senderRule] || '未记录';
@@ -748,13 +777,16 @@
       const reasons = event.reasons.map(reason => MAIL_TRACE_REASONS[reason]).filter(Boolean);
       if (reasons.length) row.append(el('p', 'small-text', `记录的触发原因：${reasons.join('、')}`));
       if (event.projectRouteStale) row.append(el('p', 'small-text', '项目提醒依据在处理时已失效。'));
-      if (event.actionable === false) row.append(el('p', 'small-text', 'Agent 判断无需行动；独立提醒规则仍以投递记录为准。'));
+      if (event.actionable === false && event.notificationOutcome !== 'non_actionable') row.append(el('p', 'small-text', 'Agent 判断无需行动。'));
       row.append(el('p', 'small-text', event.wakeup
-        ? `${MAIL_TRACE_WAKEUPS[event.wakeup.status] || '唤醒状态未识别'}${mailTraceError(event.wakeup.errorCode)}` : '未找到唤醒记录。'));
+        ? `${MAIL_TRACE_WAKEUPS[event.wakeup.status] || '唤醒状态未识别'}${mailTraceQueue(event.wakeup)}` : '未找到唤醒记录。'));
       for (const item of event.deliveries) {
-        row.append(el('p', 'small-text', `${MAIL_TRACE_DELIVERIES[item.status] || 'WhatsApp 状态未识别'} · ${formatDate(item.deliveredAt || item.createdAt)}${mailTraceError(item.errorCode)}`));
+        row.append(el('p', 'small-text', `${MAIL_TRACE_DELIVERIES[item.status] || 'WhatsApp 状态未识别'} · ${formatDate(item.deliveredAt || item.createdAt)}${mailTraceQueue(item)}`));
       }
-      if (!event.deliveries.length) row.append(el('p', 'small-text', '未找到该事件的 WhatsApp 投递记录。'));
+      if (!event.deliveries.length) row.append(el('p', 'small-text', mailTraceDeliverySummary(event)));
+      if (event.eventId && (event.status === 'failed' || event.notificationOutcome === 'expected_but_missing')) {
+        row.append(el('p', 'small-text', `排查用事件 ID：${event.eventId}`));
+      }
       if (event.deliveriesTruncated) row.append(el('p', 'small-text', '仅显示最近 5 条 WhatsApp 记录。'));
       details.append(row);
     }
@@ -767,17 +799,20 @@
     const status = el('p', 'small-text');
     status.setAttribute('role', 'status');
     const content = el('div');
+    let hasTrace = false;
     const reload = button('重新读取判断', () => load(), 'button ghost small');
     async function load() {
       reload.disabled = true;
       status.textContent = '正在读取提醒判断…';
       try {
         const trace = await request.api(`/mail/messages/by-id/${encodeURIComponent(messageId)}/notification-trace`);
-        if (request.active) renderMailTrace(content, status, trace);
+        if (request.active) {
+          renderMailTrace(content, status, trace);
+          hasTrace = true;
+        }
       } catch {
         if (request.active) {
-          content.replaceChildren();
-          status.textContent = '暂时无法读取提醒判断，可重新读取。';
+          status.textContent = hasTrace ? '刷新失败，仍显示上次读取的判断。' : '暂时无法读取提醒判断，可重新读取。';
         }
       } finally {
         if (request.active) reload.disabled = false;

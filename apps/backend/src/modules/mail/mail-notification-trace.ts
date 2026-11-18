@@ -1,13 +1,13 @@
 import { NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GATE_CLASSES, senderRuleSnapshotAction } from './business-gate.rules';
-import { canonicalMessageId } from './email-thread';
 
 const RECENT_LIMIT = 5;
 const ROUTE_REASONS = ['sender_whitelist', 'active_project_update', 'actionable_intent'];
 const FILTERED_CLASSES = new Set<string>(GATE_CLASSES.filter((value) => value !== 'BUSINESS_HUMAN' && value !== 'UNKNOWN'));
 const ERROR_CODES = new Set([
-  'SYSTEM_SENDER_SUPPRESSED', 'NOTIFICATION_TARGET_NOT_ALLOWED', 'WHATSAPP_RECIPIENT_INVALID',
+  'SYSTEM_SENDER_SUPPRESSED', 'SOURCE_EMAIL_DELETED', 'PROJECT_NOTIFICATION_STALE',
+  'NOTIFICATION_TARGET_NOT_ALLOWED', 'WHATSAPP_RECIPIENT_INVALID', 'INTEGRATION_REQUEST_FAILED',
   'OPENCLAW_WHATSAPP_DELIVERY_UNCONFIRMED', 'OPENCLAW_WHATSAPP_DELIVERY_OUTCOME_UNKNOWN',
   'TRIAGE_LEASE_EXPIRED_RETRY', 'TRIAGE_LEASE_EXPIRED_MAX_ATTEMPTS', 'TRIAGE_SYSTEM_SENDER_SUPPRESSED',
   'TRIAGE_MANUAL_CLASSIFICATION_OVERRIDE', 'TRIAGE_RECEIVED_DATE_UNKNOWN', 'TRIAGE_OUTPUT_SCHEMA_INVALID',
@@ -16,11 +16,18 @@ const ERROR_CODES = new Set([
   'AI_RATE_LIMITED', 'AI_UPSTREAM_UNAVAILABLE', 'AI_UPSTREAM_REJECTED', 'AI_INVALID_JSON', 'AI_INVALID_RESPONSE',
   'AI_INCOMPLETE_RESPONSE', 'AI_EMPTY_RESPONSE', 'AI_CONTEXT_LIMIT_EXCEEDED', 'AI_CONTEXT_LIMIT_TOO_SMALL',
 ]);
+const STORED_QUEUE_ERRORS = new Map([
+  ['Agent event remains unprocessed; wakeup sent again', 'AGENT_WAKEUP_REQUEUED'],
+  ['Agent event wakeup retry limit reached', 'AGENT_WAKEUP_RETRY_LIMIT'],
+  ['Agent webhook retry limit reached', 'AGENT_WAKEUP_RETRY_LIMIT'],
+  ['Previous webhook lease expired; callback is idempotent', 'AGENT_WAKEUP_LEASE_EXPIRED'],
+  ['Delivery lease expired; automatic resend suppressed because provider outcome is unknown', 'WHATSAPP_DELIVERY_LEASE_EXPIRED'],
+]);
 
 function errorCode(value: string | null) {
   if (!value) return null;
-  if (ERROR_CODES.has(value) || /^OPENCLAW_HTTP_[1-5]\d\d$/.test(value)) return value;
-  return 'DETAIL_UNAVAILABLE';
+  if (ERROR_CODES.has(value) || /^(?:OPENCLAW|AGENT_WEBHOOK)_HTTP_[1-5]\d\d$/.test(value)) return value;
+  return STORED_QUEUE_ERRORS.get(value) ?? 'DETAIL_UNAVAILABLE';
 }
 
 function safeEvidence(value: Prisma.JsonValue) {
@@ -49,7 +56,22 @@ function routingHint(
   if (triageStatus === 'review') return 'triage_review';
   if (triageStatus === 'pending' || triageStatus === 'processing') return 'triage_waiting';
   if (triageStatus === 'failed') return 'triage_failed';
+  if (triageStatus === 'high' || triageStatus === 'urgent') return 'triage_candidate_no_event';
   return 'not_recorded';
+}
+
+function queueStatus({ status, attempts, nextAttemptAt, lastError }: { status: string; attempts: number; nextAttemptAt: Date; lastError: string | null }) {
+  return { status, attempts, nextAttemptAt: status === 'pending' ? nextAttemptAt : null, errorCode: errorCode(lastError) };
+}
+
+function notificationOutcome(status: string, hasDelivery: boolean, payload: Prisma.JsonObject, actionable: boolean | null) {
+  if (hasDelivery) return 'recorded';
+  if (status !== 'completed') return 'not_recorded';
+  const actionableCandidate = actionable === true && payload.classification === 'BUSINESS_HUMAN' &&
+    (payload.importance === 'high' || payload.importance === 'urgent');
+  const projectRoute = payload.projectNotification === true && payload.projectProjectRouteStale !== true;
+  if (payload.notificationRequired === true || actionableCandidate || projectRoute) return 'expected_but_missing';
+  return actionable === false ? 'non_actionable' : 'not_recorded';
 }
 
 export async function readMailNotificationTrace(tx: Prisma.TransactionClient, mailAccountId: string, messageId: string) {
@@ -62,28 +84,40 @@ export async function readMailNotificationTrace(tx: Prisma.TransactionClient, ma
     },
   });
   if (!message) throw new NotFoundException({ code: 'MAIL_MESSAGE_NOT_FOUND' });
-  const canonicalId = await canonicalMessageId(tx, message);
-  const sourceIds = [message.id, canonicalId];
-  const [triages, events] = await Promise.all([
-    tx.emailImportanceTriage.findMany({
-      where: { mailAccountId, sourceMessageId: { in: sourceIds } },
+  const rfcId = message.rfcMessageId?.trim();
+  const sourceIds = rfcId
+    ? Prisma.sql`SELECT "id" FROM "EmailMessage" WHERE "mailAccountId" = ${mailAccountId}
+      AND ("id" = ${message.id} OR BTRIM("rfcMessageId") = ${rfcId})`
+    : Prisma.sql`SELECT ${message.id}::text`;
+  const [triageRows, eventRows] = await Promise.all([
+    tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT "id" FROM "EmailImportanceTriage" WHERE "mailAccountId" = ${mailAccountId} AND "sourceMessageId" IN (${sourceIds})
+      ORDER BY ("sourceMessageId" = ${message.id}) DESC, "updatedAt" DESC, "id" DESC LIMIT 1
+    `),
+    tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT "id" FROM "AgentEvent" WHERE "entityType" = 'email_message' AND "eventType" = 'INBOUND_EMAIL_RECEIVED'
+        AND "entityId" IN (${sourceIds})
+      ORDER BY "createdAt" DESC, "id" DESC LIMIT ${RECENT_LIMIT + 1}
+    `),
+  ]);
+  const [triage, events] = await Promise.all([
+    triageRows[0] ? tx.emailImportanceTriage.findUnique({
+      where: { id: triageRows[0].id },
       select: { sourceMessageId: true, status: true, importance: true, intent: true, confidence: true, reason: true, evidenceJson: true, analyzedAt: true, lastErrorCode: true },
-    }),
-    tx.agentEvent.findMany({
-      where: { entityType: 'email_message', entityId: { in: sourceIds }, eventType: 'INBOUND_EMAIL_RECEIVED' },
+    }) : null,
+    eventRows.length ? tx.agentEvent.findMany({
+      where: { id: { in: eventRows.map(({ id }) => id) } },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: RECENT_LIMIT + 1,
       select: {
-        entityId: true, status: true, createdAt: true, processedAt: true, lastError: true, payloadJson: true, resultJson: true,
-        wakeupDelivery: { select: { status: true, deliveredAt: true, lastError: true } },
+        id: true, entityId: true, status: true, createdAt: true, processedAt: true, lastError: true, payloadJson: true, resultJson: true,
+        wakeupDelivery: { select: { status: true, deliveredAt: true, lastError: true, attempts: true, nextAttemptAt: true } },
         notifications: {
           where: { channel: 'whatsapp' }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: RECENT_LIMIT + 1,
-          select: { status: true, createdAt: true, deliveredAt: true, lastError: true },
+          select: { status: true, createdAt: true, deliveredAt: true, lastError: true, attempts: true, nextAttemptAt: true },
         },
       },
-    }),
+    }) : [],
   ]);
-  const triage = triages.find((row) => row.sourceMessageId === message.id) ?? triages[0];
   const senderRule = senderRuleSnapshotAction(message.senderRuleSnapshot);
   return {
     messageId, readAt: new Date(),
@@ -104,15 +138,18 @@ export async function readMailNotificationTrace(tx: Prisma.TransactionClient, ma
       const result = record(event.resultJson);
       const reasons = Array.isArray(payload.notificationReasons) ? payload.notificationReasons : [];
       const wakeup = event.wakeupDelivery;
+      const actionable = typeof result.actionable === 'boolean' ? result.actionable : null;
       return {
+        eventId: event.id,
         status: event.status, createdAt: event.createdAt, processedAt: event.processedAt, errorCode: errorCode(event.lastError),
         fromCanonicalCopy: event.entityId !== message.id,
         reasons: ROUTE_REASONS.filter((reason) => reasons.includes(reason)),
         projectRouteStale: payload.projectProjectRouteStale === true,
-        actionable: typeof result.actionable === 'boolean' ? result.actionable : null,
-        wakeup: wakeup ? { status: wakeup.status, deliveredAt: wakeup.deliveredAt, errorCode: errorCode(wakeup.lastError) } : null,
-        deliveries: event.notifications.slice(0, RECENT_LIMIT).map(({ status, createdAt, deliveredAt, lastError }) => ({
-          status, createdAt, deliveredAt, errorCode: errorCode(lastError),
+        actionable,
+        notificationOutcome: notificationOutcome(event.status, event.notifications.length > 0, payload, actionable),
+        wakeup: wakeup ? { ...queueStatus(wakeup), deliveredAt: wakeup.deliveredAt } : null,
+        deliveries: event.notifications.slice(0, RECENT_LIMIT).map((delivery) => ({
+          ...queueStatus(delivery), createdAt: delivery.createdAt, deliveredAt: delivery.deliveredAt,
         })),
         deliveriesTruncated: event.notifications.length > RECENT_LIMIT,
       };
