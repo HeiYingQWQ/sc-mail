@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, copyFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, copyFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
@@ -15,6 +15,8 @@ assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(adminUrl.hostname));
 assert.equal(adminUrl.pathname, '/sc_mail_ci', 'Use the disposable sc_mail_ci administration database');
 const database = `aimail_backup_fixture_${randomUUID().replaceAll('-', '')}`;
 const sourceUrl = new URL(adminUrl); sourceUrl.pathname = `/${database}`;
+const migrationNames = (await readdir(new URL('../prisma/migrations/', import.meta.url), { withFileTypes: true }))
+  .filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
 const admin = new PrismaClient({ datasourceUrl: adminUrl.toString() });
 const db = new PrismaClient({ datasourceUrl: sourceUrl.toString() });
 const dir = await mkdtemp(join(tmpdir(), 'sc-mail-backup-pg-'));
@@ -28,6 +30,7 @@ try {
   const project = await db.project.create({ data: { name: 'Synthetic recovery project' } });
   const mail = await db.emailMessage.create({ data: { mailAccountId: account.id, mailbox: 'INBOX', uidValidity: 1n, uid: 1, providerMessageId: 'fixture-1', direction: 'inbound', fromJson: [{ address: 'customer@test.invalid' }], toJson: [], ccJson: [], bccJson: [], headersJson: {}, rawSource: raw, bodyText: 'Evidence preserved.', contactId: contact.id, projectId: project.id } });
   const task = await db.task.create({ data: { title: 'Synthetic task', createdFromMessageId: mail.id, projectId: project.id, manualOverride: true } });
+  await db.emailImportanceTriage.create({ data: { mailAccountId: account.id, sourceMessageId: mail.id, status: 'quiet', importance: 'low', intent: 'non_actionable' } });
   const event = await db.agentEvent.create({ data: { eventKey: 'backup-fixture-event', eventType: 'INBOUND_EMAIL_RECEIVED', entityType: 'email', entityId: mail.id, payloadJson: {}, notificationPolicy: 'REALTIME' } });
   await db.notificationDelivery.create({ data: { requestKey: 'backup-fixture-notice', requestHash: 'synthetic', eventId: event.id, channel: 'whatsapp', recipientRef: '+15555550123', content: 'Synthetic; never sent', status: 'unknown' } });
   const runner = postgresRunner();
@@ -40,14 +43,17 @@ try {
   await db.$disconnect();
   await admin.$executeRawUnsafe(`DROP DATABASE "${database}" WITH (FORCE)`); created = false;
   const report = await verifyBackup(copied, { validate: async ({ database: restoredName, counts }) => {
-    assert.equal(counts.mail, 1); assert.equal(counts.contacts, 1); assert.equal(counts.tasks, 1); assert.equal(counts.migrations, 27);
+    assert.equal(counts.mail, 1); assert.equal(counts.contacts, 1); assert.equal(counts.tasks, 1); assert.equal(counts.migrations, migrationNames.length);
     const restoredUrl = new URL(adminUrl); restoredUrl.pathname = `/${restoredName}`;
     const restored = new PrismaClient({ datasourceUrl: restoredUrl.toString() });
     try {
+      const restoredMigrations = await restored.$queryRaw`SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`;
+      assert.deepEqual(restoredMigrations.map(row => row.migration_name).sort(), migrationNames);
       const recovered = await restored.task.findUniqueOrThrow({ where: { id: task.id }, include: { createdFromMessage: true, project: true } });
       assert.equal(recovered.title, 'Synthetic task'); assert.equal(recovered.manualOverride, true);
       assert.equal(recovered.project.name, project.name); assert.equal(recovered.createdFromMessage.contactId, contact.id);
       assert.deepEqual(Buffer.from(recovered.createdFromMessage.rawSource), raw);
+      assert.equal((await restored.emailImportanceTriage.findUniqueOrThrow({ where: { sourceMessageId: mail.id } })).intent, 'non_actionable');
       assert.equal((await restored.notificationDelivery.findUniqueOrThrow({ where: { requestKey: 'backup-fixture-notice' } })).status, 'unknown');
     } finally { await restored.$disconnect(); }
   } });
@@ -64,7 +70,7 @@ try {
   assert.equal(reachedSlowQuery, true, 'Deadline test must reach a real PostgreSQL query');
   const leftovers = await admin.$queryRawUnsafe("SELECT datname FROM pg_database WHERE datname LIKE 'aimail_restore_check_%'");
   assert.deepEqual(leftovers, []);
-  console.log('Saved-file PostgreSQL restore passed: copied archive, removed source, exact MIME/CRM/task relations, unknown notification preserved, corrupt archive rejected, temporary databases removed.');
+  console.log('Saved-file PostgreSQL restore passed: copied archive, removed source, complete migrations, exact MIME/CRM/task relations, triage intent and unknown notification preserved, corrupt archive rejected, temporary databases removed.');
 } finally {
   await db.$disconnect();
   if (created) await admin.$executeRawUnsafe(`DROP DATABASE "${database}" WITH (FORCE)`);

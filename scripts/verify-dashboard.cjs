@@ -155,6 +155,76 @@ test('closing a modal aborts its read request', async () => {
   assert.doesNotMatch(h.app.dialogContent.textContent, /late failure/);
 });
 
+const mailTrace = overrides => ({
+  classification: { value: 'BUSINESS_HUMAN', evidence: [], manuallySet: false, reviewRequired: false },
+  senderRule: 'none', routingHint: 'not_recorded', triage: null, events: [], ...overrides,
+});
+test('mail detail separates the wakeup from unknown WhatsApp delivery and keeps the body on read failure', async () => {
+  let reads = 0;
+  const h = harness(url => {
+    if (!url.endsWith('/notification-trace')) return response({ id: 'mail-trace', subject: 'Quote', bodyText: 'Current email body' });
+    if (++reads === 1) return response({}, 503);
+    return response(mailTrace({
+      routingHint: 'event_recorded',
+      triage: { status: 'high', importance: 'high', intent: 'customer_inquiry', confidence: 0.96, evidence: ['<img src=x>'] },
+      events: [{ status: 'completed', reasons: ['actionable_intent'], createdAt: '2026-10-12T08:00:00Z',
+        wakeup: { status: 'delivered' }, deliveries: [{ status: 'unknown', errorCode: 'OPENCLAW_WHATSAPP_DELIVERY_UNCONFIRMED', createdAt: '2026-10-12T08:01:00Z' }] }],
+    }));
+  });
+  await h.app.openEmail('mail-trace'); await flush();
+  assert.match(h.app.dialogContent.textContent, /暂时无法读取提醒判断.*Current email body/);
+  await fire(button(h.app.dialogContent, '重新读取判断')); await flush();
+  assert.match(h.app.dialogContent.textContent, /WhatsApp 投递结果未确认.*意图：客户询问.*OpenClaw 已接收唤醒/);
+  assert.equal(find(h.app.dialogContent, node => node.tagName === 'BLOCKQUOTE').textContent, '<img src=x>');
+  assert.equal(h.requests.filter(request => request.url.endsWith('/notification-trace')).length, 2);
+  assert.ok(h.requests.every(request => !request.options.method || request.options.method === 'GET'));
+});
+
+test('a slow trace leaves the body usable and cannot replace the next mail judgment', async () => {
+  const pending = deferred();
+  const h = harness(url => {
+    if (url.endsWith('/old/notification-trace')) return pending.promise;
+    if (url.endsWith('/new/notification-trace')) return response(mailTrace());
+    return response({ id: url.split('/').at(-1), bodyText: 'Body is already visible' });
+  });
+  await h.app.openEmail('old');
+  assert.match(h.app.dialogContent.textContent, /正在读取提醒判断….*Body is already visible/);
+  await h.app.openEmail('new'); await flush();
+  assert.match(h.app.dialogContent.textContent, /未找到提醒事件，无法确定当时的提醒结果/);
+  const current = h.app.dialogContent.textContent;
+  pending.resolve(response(mailTrace({ routingHint: 'triage_quiet' }))); await flush();
+  assert.equal(h.app.dialogContent.textContent, current);
+  assert.equal(h.requests.find(item => item.url.endsWith('/old/notification-trace')).options.signal.aborted, true);
+});
+
+test('mail trace shows mixed delivery and keeps expanded diagnostics after a failed refresh', async () => {
+  let reads = 0;
+  const time = '2026-11-18T10:00:00Z';
+  const event = { eventId: 'synthetic-trace-id', createdAt: time, status: 'completed', reasons: [], wakeup: {
+    status: 'pending', attempts: 2, nextAttemptAt: time, errorCode: 'AGENT_WEBHOOK_HTTP_503',
+  } };
+  const h = harness(url => {
+    if (!url.endsWith('/notification-trace')) return response({ id: 'mail-trace', bodyText: 'Current email body' });
+    if (++reads === 2) return response({}, 503);
+    const latest = reads === 1
+      ? { ...event, notificationOutcome: 'recorded', deliveries: [{ status: 'delivered', createdAt: time }, { status: 'unknown', createdAt: time }] }
+      : { ...event, notificationOutcome: 'expected_but_missing', deliveries: [] };
+    return response(mailTrace({ routingHint: 'event_recorded', events: [latest] }));
+  });
+  await h.app.openEmail('mail-trace'); await flush();
+  const section = find(h.app.dialogContent, node => node.classList.contains('notification-trace'));
+  assert.match(section.textContent, /2 条 WhatsApp 记录（WhatsApp 投递已确认、WhatsApp 投递结果未确认）/);
+  assert.match(section.textContent, /已尝试 2 次.*最早可处理时间.*唤醒接口返回 HTTP 503/);
+  await fire(section.querySelector('summary'));
+  const reload = button(section, '重新读取判断');
+  await fire(reload); await flush();
+  assert.equal(section.querySelector('details').open, true);
+  assert.match(section.textContent, /刷新失败，仍显示上次读取的判断。.*WhatsApp 投递已确认.*WhatsApp 投递结果未确认/);
+  await fire(reload); await flush();
+  assert.equal(section.querySelector('details').open, true);
+  assert.match(section.textContent, /应有 WhatsApp 投递，但未找到记录.*排查用事件 ID：synthetic-trace-id/);
+});
+
 test('picker can reach contact 101 and search without losing selection on load more', async () => {
   const h = harness(url => {
     const params = new URL(url, 'http://test').searchParams;

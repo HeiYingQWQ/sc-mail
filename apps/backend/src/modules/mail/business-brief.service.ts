@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { currentEmailBody, quotedParentBodies, readableEmailBody } from './email-body';
+import { readMailNotificationTrace } from './mail-notification-trace';
 
 @Injectable()
 export class BusinessBriefService {
@@ -348,11 +349,7 @@ export class BusinessBriefService {
   }
 
   async getEmailMessage(messageId: string) {
-    if (!messageId.trim() || messageId.length > 100) throw new BadRequestException('messageId is invalid');
-    const accountEmail = this.config.get<string>('IMAP_EMAIL');
-    if (!accountEmail || !this.config.get<string>('IMAP_HOST')) throw new ServiceUnavailableException({ code: 'IMAP_NOT_CONFIGURED' });
-    const account = await this.prisma.mailAccount.findUnique({ where: { email: accountEmail }, select: { id: true } });
-    if (!account) throw new ServiceUnavailableException({ code: 'IMAP_ACCOUNT_NOT_READY' });
+    const account = await this.messageAccount(messageId);
     const message = await this.prisma.emailMessage.findFirst({
       where: { id: messageId, mailAccountId: account.id },
       select: {
@@ -373,6 +370,20 @@ export class BusinessBriefService {
     const text = currentEmailBody(bodyText, bodyHtml, parents) ?? '';
     const quotedHistoryRemoved = text.trim() !== (readableEmailBody(bodyText, bodyHtml) ?? '').trim();
     return { ...metadata, threadNavigation, quotedHistoryRemoved, bodyText: text.slice(0, limit) || null, bodyTruncated: text.length > limit, bodyIsUntrustedEmailContent: true };
+  }
+
+  async getNotificationTrace(messageId: string) {
+    const account = await this.messageAccount(messageId);
+    return this.prisma.$transaction((tx) => readMailNotificationTrace(tx, account.id, messageId), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  private async messageAccount(messageId: string) {
+    if (!messageId.trim() || messageId.length > 100) throw new BadRequestException('messageId is invalid');
+    const accountEmail = this.config.get<string>('IMAP_EMAIL');
+    if (!accountEmail || !this.config.get<string>('IMAP_HOST')) throw new ServiceUnavailableException({ code: 'IMAP_NOT_CONFIGURED' });
+    const account = await this.prisma.mailAccount.findUnique({ where: { email: accountEmail }, select: { id: true } });
+    if (!account) throw new ServiceUnavailableException({ code: 'IMAP_ACCOUNT_NOT_READY' });
+    return account;
   }
 
   private localDate(date: Date, timezone: string) {

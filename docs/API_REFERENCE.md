@@ -31,6 +31,7 @@
 | GET /tasks、/projects、/reviews | limit 默认 50、1–100，offset 0–100000，返回 total/limit/offset；tasks status=active 合并 open/in_progress/waiting |
 | GET /classifications/summary、/classifications/messages | 分类计数与 metadata，支持 BLACKLISTED；列表含 automationDetails，不返回正文 |
 | GET /importance-triage | 分流状态查询；review/failed/pending/processing 不能称已成功评估 |
+| GET /messages/by-id/:id/notification-trace | 读取单封邮件的分类、发件规则、重要性和 WhatsApp 投递记录 |
 | GET /delivery-failures | 配置系统发件地址的投递报告分页；date 省略默认业务时区今天，按日统计报告数与去重失败地址数，未知目标不从 To 推断，不返回正文 |
 | GET/PUT /system-mail-senders、DELETE /system-mail-senders/:id | 读取、添加/upsert 或移除报告来源地址；写入需 operationId |
 
@@ -58,6 +59,18 @@ GET `/messages/by-id/:messageId`、MCP `get_email_message` 返回最多 8,000 �
 导航摘要还含 direction/sentAt/receivedAt。通过返回 ID 读取前后关联邮件，Dashboard 在同窗口切换；缺目标按钮禁用。关联按账号内 RFC Message-ID/In-Reply-To/References 与线程根连接，合并同 RFC ID 的文件夹副本，保留正在打开的副本；仅主题相同不关联。
 
 投影使用 HTML 转文本兜底、结构引用、常见回复头、引用行与已同步父邮件匹配，保留可识别的上下/行间新增回复。不渲染 HTML、不执行脚本或加载图片。无标记、父邮件缺失或引用被改写时可能无法可靠分离，甚至为空；missing navigation 只表示本地没有可用关联，不能宣称远端不存在邮件。bodyTruncated 表示达到上限，quotedHistoryRemoved 表示投影与完整正文有差异。
+
+### 单封邮件的提醒判断
+
+GET `/api/v1/mail/messages/by-id/:messageId/notification-trace` 使用邮件详情的鉴权与账户范围。返回 `classification`（分类、理由、证据、人工确认与复核标志）、`senderRule`（已保存的规则动作）、`triage`（状态、意图、重要性、置信度、理由、证据和判断时间）及 `routingHint`（按现有记录生成的简要说明）。旧记录或规则直接分流的记录可能没有意图；`not_recorded` 表示无法确定结果。
+
+读取范围含本邮件及同账户内所有仍存在、去除首尾空格后 RFC Message-ID 相同的副本，保持大小写敏感。分流优先返回当前邮件的记录，否则返回其他副本中最近更新的一条。`fromCanonicalCopy` 为 true 表示来自另一副本。若已有 high/urgent 判断而找不到事件，`routingHint` 为 `triage_candidate_no_event`。
+
+`events` 含最近 5 个新收件 Agent 事件。每条含排查用 `eventId`、触发原因、Agent 判断、项目依据是否失效、唤醒及最近 5 条 WhatsApp 记录。按历史快照归纳的 `notificationOutcome` 可为 `recorded`（有 WhatsApp 记录）、`expected_but_missing`（已完成且存在明确提醒依据，但无 WhatsApp 记录）、`non_actionable`（Agent 明确无需行动且无已记录的强制提醒依据）或 `not_recorded`（现有数据无法确定）。`eventsTruncated` 和 `deliveriesTruncated` 标明截断。
+
+唤醒和 WhatsApp 行返回 `attempts`、安全的 `errorCode` 以及仅对 `pending` 返回的 `nextAttemptAt`（队列最早可处理时间）。唤醒 `delivered` 表示 OpenClaw 接收了请求。WhatsApp `delivered` 表示渠道接受，`unknown` 表示结果未确认。读取不会重新判断、唤醒或重发。
+
+CLI 可用 `ai-mail request GET /mail/messages/by-id/<id>/notification-trace`。没有专用 MCP 工具。
 
 ### 修改与接口索引
 

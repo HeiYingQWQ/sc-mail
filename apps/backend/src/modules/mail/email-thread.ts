@@ -3,6 +3,16 @@ import { PrismaService } from '../../database/prisma.service';
 
 type ThreadMessage = { id: string; rfcMessageId: string | null; subject: string | null; direction: string; sentAt: Date | null; receivedAt: Date | null };
 
+export async function canonicalMessageId(db: Prisma.TransactionClient, message: { id: string; mailAccountId: string; rfcMessageId: string | null }) {
+  const rfcId = message.rfcMessageId?.trim();
+  if (!rfcId) return message.id;
+  const copies = await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT "id" FROM "EmailMessage" WHERE "mailAccountId" = ${message.mailAccountId} AND BTRIM("rfcMessageId") = ${rfcId}
+    ORDER BY "createdAt" ASC, "id" ASC LIMIT 1
+  `);
+  return copies[0]?.id ?? message.id;
+}
+
 /** RFC relationships, never subject equality. UNION terminates even for malformed cyclic headers. */
 export async function emailThreadNavigation(db: PrismaService, accountId: string, messageId: string) {
   const members = await db.$queryRaw<ThreadMessage[]>(Prisma.sql`

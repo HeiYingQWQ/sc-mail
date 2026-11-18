@@ -6,6 +6,7 @@ import { PgBoss, type Job } from 'pg-boss';
 import { PrismaService } from '../../database/prisma.service';
 import { AI_PROVIDER, AIProvider, AIProviderError } from '../ai/ai-provider';
 import { currentEmailBody } from './email-body';
+import { canonicalMessageId } from './email-thread';
 import { PROJECT_ASSIGNMENT_OUTPUT_SCHEMA, PROJECT_ASSIGNMENT_PROMPT, PROJECT_ASSIGNMENT_SCHEMA_VERSION, ProjectAssignmentResult, validateProjectAssignmentEvidence } from '../ai/project-assignment.schema';
 import { validateAgainstJsonSchema } from '../ai/json-schema.validator';
 import { fromMailboxAddresses, isConfiguredSystemSender, senderRuleSnapshotAction } from './business-gate.rules';
@@ -1094,12 +1095,8 @@ export class ProjectEmailAnalysisService implements OnModuleInit, OnModuleDestro
   }
 
   async canonicalMailId(tx: AnalysisTx | PrismaService, messageId: string) {
-    const message = await tx.emailMessage.findUnique({ where: { id: messageId }, select: { id: true, mailAccountId: true, rfcMessageId: true, providerMessageId: true } });
-    if (!message) return messageId;
-    const rfcId = message.rfcMessageId?.trim();
-    if (!rfcId) return message.id;
-    const copies = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "EmailMessage" WHERE "mailAccountId" = ${message.mailAccountId} AND BTRIM("rfcMessageId") = ${rfcId} ORDER BY "createdAt" ASC, "id" ASC LIMIT 1`);
-    return copies[0]?.id ?? message.id;
+    const message = await tx.emailMessage.findUnique({ where: { id: messageId }, select: { id: true, mailAccountId: true, rfcMessageId: true } });
+    return message ? canonicalMessageId(tx, message) : messageId;
   }
 
   async manuallyAssign(messageIdValue: unknown, body: Record<string, unknown>) {
